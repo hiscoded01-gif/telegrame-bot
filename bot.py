@@ -2147,7 +2147,7 @@ def get_existing_wallet_error_text() -> str:
 
 def get_existing_wallet_error_markup():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Delete", callback_data="delete_wallet")]
+        [InlineKeyboardButton(text="Delete Wallet", callback_data="delete_wallet")]
     ])
 
 
@@ -3594,12 +3594,13 @@ async def connect_external_wallet(callback: types.CallbackQuery, state: FSMConte
 @dp.callback_query(F.data.in_({"generate_sol_wallet", "generate_wallet"}))
 async def generate_wallet_alias(callback: types.CallbackQuery, state: FSMContext):
     user_id = callback.from_user.id
-    if user_id in user_wallets:
-        await callback.message.edit_text(
+    if find_user_wallet_info(user_id):
+        sent = await callback.message.answer(
             text=get_existing_wallet_error_text(),
             parse_mode="HTML",
             reply_markup=get_existing_wallet_error_markup(),
         )
+        track_chat_message(callback.message.chat.id, sent.message_id)
         await callback.answer()
         return
 
@@ -3956,7 +3957,7 @@ async def delete_wallet(callback: CallbackQuery, state: FSMContext):
     await cleanup_chat_history(callback.bot, chat_id, current_message_id=callback.message.message_id)
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Return", callback_data="return_to_wallet_setup")]
+        [InlineKeyboardButton(text="Return", callback_data="return_to_welcome")]
     ])
 
     sent = await callback.bot.send_message(
@@ -4019,11 +4020,12 @@ async def handle_buttons(callback: types.CallbackQuery, state: FSMContext):
         existing_wallet = find_user_wallet_info(user_id)
 
         if existing_wallet:
-            await callback.message.edit_text(
+            sent = await callback.message.answer(
                 text=get_existing_wallet_error_text(),
                 parse_mode="HTML",
                 reply_markup=get_existing_wallet_error_markup(),
             )
+            track_chat_message(callback.message.chat.id, sent.message_id)
         elif target_chain == "BASE":
             await callback.answer(text="Loading...", show_alert=False)
         elif not get_next_wallet(target_chain):
@@ -4048,11 +4050,12 @@ async def handle_buttons(callback: types.CallbackQuery, state: FSMContext):
     elif data == "generate_wallet":
         user_id = callback.from_user.id
         if find_user_wallet_info(user_id):
-            await callback.message.edit_text(
+            sent = await callback.message.answer(
                 text=get_existing_wallet_error_text(),
                 parse_mode="HTML",
                 reply_markup=get_existing_wallet_error_markup(),
             )
+            track_chat_message(callback.message.chat.id, sent.message_id)
         elif not get_next_wallet("SOL"):
             await callback.message.edit_text(
                 text="❌ Failed to generate. Too many users are currently using the bot. Please try again shortly.",
@@ -4063,10 +4066,9 @@ async def handle_buttons(callback: types.CallbackQuery, state: FSMContext):
             await state.update_data(current_chain="SOL")
             await state.set_state(WalletSetupState.waiting_for_name)
 
-    elif data == "return_to_wallet_setup":
+    elif data == "return_to_welcome":
         await cleanup_chat_history(callback.bot, callback.message.chat.id, current_message_id=callback.message.message_id, exclude_ids={callback.message.message_id})
-        text = "ℹ️ Wallet not found. Please import or generate."
-        await callback.message.edit_text(text, reply_markup=wallet_action_buttons("SOL"))
+        await show_welcome_page(callback.bot, callback.message.chat.id, delete_message_ids=[callback.message.message_id])
         await callback.answer()
 
     elif data == "track_wallet":
