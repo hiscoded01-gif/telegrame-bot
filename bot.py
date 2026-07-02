@@ -3548,7 +3548,7 @@ async def connect_external_wallet(callback: types.CallbackQuery, state: FSMConte
     await callback.answer()
 
 
-@dp.callback_query(F.data.in_("generate_sol_wallet", "generate_wallet"))
+@dp.callback_query(F.data.in_({"generate_sol_wallet", "generate_wallet"}))
 async def generate_wallet_alias(callback: types.CallbackQuery, state: FSMContext):
     user_id = callback.from_user.id
     if user_id in user_wallets:
