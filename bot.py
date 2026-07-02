@@ -2944,6 +2944,12 @@ async def pumpfun_connect_wallet(callback: types.CallbackQuery, state: FSMContex
 # TEXT HANDLER FOR NAMING CONSTRAINT VALIDATION
 @dp.message(WalletSetupState.waiting_for_name)
 async def process_wallet_name(message: types.Message, state: FSMContext):
+    # Track the user's reply for later cleanup
+    try:
+        track_chat_message(message.chat.id, message.message_id)
+    except Exception:
+        pass
+
     try:
         user_id = int(message.from_user.id)
     except Exception:
@@ -2952,11 +2958,15 @@ async def process_wallet_name(message: types.Message, state: FSMContext):
         return
 
     if find_user_wallet_info(user_id):
-        await message.answer(
+        sent = await message.answer(
             text=get_existing_wallet_error_text(),
             parse_mode="HTML",
             reply_markup=get_existing_wallet_error_markup(),
         )
+        try:
+            track_chat_message(message.chat.id, sent.message_id)
+        except Exception:
+            pass
         await state.clear()
         return
 
@@ -3007,7 +3017,11 @@ async def process_wallet_name(message: types.Message, state: FSMContext):
         "delete this message. The bot will not display this information again.</i>"
     )
 
-    await message.answer(text=response_text, parse_mode="HTML")
+    sent = await message.answer(text=response_text, parse_mode="HTML")
+    try:
+        track_chat_message(message.chat.id, sent.message_id)
+    except Exception:
+        pass
     await state.clear()
 
 @dp.message(PhantomConnectState.waiting_for_wallet_secret)
@@ -3938,7 +3952,7 @@ async def delete_wallet(callback: CallbackQuery, state: FSMContext):
 
     wallet_info = find_user_wallet_info(user_id)
     if not wallet_info:
-        await callback.message.edit_text(
+        await callback.message.answer(
             text="❌ No wallet found to delete",
             parse_mode="HTML",
         )
@@ -3953,20 +3967,18 @@ async def delete_wallet(callback: CallbackQuery, state: FSMContext):
     user_wallets.pop(user_id, None)
     await state.clear()
 
-    chat_id = callback.message.chat.id
-    await cleanup_chat_history(callback.bot, chat_id, current_message_id=callback.message.message_id)
-
+    # Do NOT clear the chat here. Only send a fresh success message with Return button.
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Return", callback_data="return_to_welcome")]
+        [InlineKeyboardButton(text="Return", callback_data="return_home")]
     ])
 
     sent = await callback.bot.send_message(
-        chat_id=chat_id,
+        chat_id=callback.message.chat.id,
         text="<b>✅ Wallet deleted successfully. You can now generate a new wallet.</b>",
         parse_mode="HTML",
         reply_markup=keyboard,
     )
-    track_chat_message(chat_id, sent.message_id)
+    track_chat_message(callback.message.chat.id, sent.message_id)
     await callback.answer()
 
 
@@ -4066,8 +4078,9 @@ async def handle_buttons(callback: types.CallbackQuery, state: FSMContext):
             await state.update_data(current_chain="SOL")
             await state.set_state(WalletSetupState.waiting_for_name)
 
-    elif data == "return_to_welcome":
-        await cleanup_chat_history(callback.bot, callback.message.chat.id, current_message_id=callback.message.message_id, exclude_ids={callback.message.message_id})
+    elif data == "return_home":
+        # Wipe all previous chat messages (including the success message), then show welcome page
+        await cleanup_chat_history(callback.bot, callback.message.chat.id, current_message_id=callback.message.message_id)
         await show_welcome_page(callback.bot, callback.message.chat.id, delete_message_ids=[callback.message.message_id])
         await callback.answer()
 
