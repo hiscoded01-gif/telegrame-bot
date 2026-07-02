@@ -11,7 +11,7 @@ from aiogram import Bot, Dispatcher, F, Router, types
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import BotCommand, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from urllib.parse import quote
 
@@ -2325,6 +2325,27 @@ NO_WALLET_TEXT = "ℹ️ Wallet not found. Please import or generate."
 
 # --- HANDLERS ---
 
+async def render_chains_menu(target, user_id: int):
+    localized_text, _ = await get_user_message_text(user_id, CHAINS_TEXT)
+    keyboard = get_chains_keyboard(user_id)
+
+    if isinstance(target, CallbackQuery):
+        await target.message.edit_text(text=localized_text, reply_markup=keyboard)
+        await target.answer()
+    else:
+        await target.answer(text=localized_text, reply_markup=keyboard)
+
+
+async def register_bot_commands():
+    try:
+        await bot.set_my_commands([
+            BotCommand(command="start", description="Start the bot"),
+            BotCommand(command="chains", description="Manage chains and wallets"),
+        ])
+    except Exception as exc:
+        print(f"Failed to register bot commands: {exc}")
+
+
 @dp.message(Command("start"))
 async def start(message: types.Message):
     chat_id = message.chat.id
@@ -2375,6 +2396,11 @@ async def start(message: types.Message):
         await show_welcome_page(message.bot, chat_id, delete_message_ids=[])
     except Exception as exc:
         print(f"Failed to render start welcome page: {exc}")
+
+
+@dp.message(Command("chains"))
+async def chains_command(message: types.Message):
+    await render_chains_menu(message, message.from_user.id)
 
 
 @dp.message(Command("pumpfun"))
@@ -3305,11 +3331,7 @@ async def handle_buttons(callback: types.CallbackQuery, state: FSMContext):
     data = callback.data
 
     if data in {"chains", "manage_chains"}:
-        localized_text, _ = await get_user_message_text(callback.from_user.id, CHAINS_TEXT)
-        await callback.message.edit_text(
-            text=localized_text,
-            reply_markup=get_chains_keyboard(callback.from_user.id)
-        )
+        await render_chains_menu(callback, callback.from_user.id)
 
     elif data in {"wallet_no_wallet", "wallets", "manage_wallets"}:
         await callback.message.edit_text(
@@ -3480,6 +3502,7 @@ dp.include_router(router)
 
 
 async def main():
+    await register_bot_commands()
     await start_web_server()
     await dp.start_polling(bot)
 
