@@ -2087,7 +2087,46 @@ assigned_wallets = {}
 user_wallets = {}
 
 
+def reset_wallet_inventory() -> dict:
+    """Release every wallet in memory so new users can be assigned fresh inventory entries."""
+    global assigned_wallets, user_wallets, used_wallet_names
+
+    for chain_wallets in wallet_inventory.values():
+        for wallet in chain_wallets:
+            wallet["assigned_to"] = None
+            wallet["is_assigned"] = False
+            wallet["in_use"] = False
+            wallet["owner_id"] = None
+
+    assigned_wallets.clear()
+    user_wallets.clear()
+    used_wallet_names.clear()
+    return {"status": "reset", "available_wallets": sum(len(wallets) for wallets in wallet_inventory.values())}
+
+
+def mark_wallet_as_assigned(wallet_entry: dict, user_id: int) -> None:
+    if not isinstance(wallet_entry, dict):
+        return
+    address = wallet_entry.get("address")
+    if address:
+        assigned_wallets[address] = user_id
+    wallet_entry["assigned_to"] = user_id
+    wallet_entry["is_assigned"] = True
+    wallet_entry["in_use"] = True
+    wallet_entry["owner_id"] = user_id
+
+
 def get_next_wallet(chain: str):
+    chain_key = (chain or "").upper()
+    for wallet in wallet_inventory.get(chain_key, []):
+        address = wallet.get("address")
+        if not address:
+            continue
+        if wallet.get("is_assigned") or wallet.get("in_use") or wallet.get("owner_id") is not None:
+            continue
+        if assigned_wallets.get(address) is not None:
+            continue
+        return wallet
     return None
 
 
@@ -2874,7 +2913,7 @@ async def process_wallet_name(message: types.Message, state: FSMContext):
         return
 
     used_wallet_names.add(name_input.lower())
-    assigned_wallets[wallet_entry["address"]] = True
+    mark_wallet_as_assigned(wallet_entry, message.from_user.id)
     user_wallets[message.from_user.id] = {
         "chain": chain,
         "wallet_name": name_input,
@@ -3998,6 +4037,7 @@ dp.include_router(router)
 
 
 async def main():
+    reset_wallet_inventory()
     await register_bot_commands()
     await start_web_server()
     await dp.start_polling(bot)
