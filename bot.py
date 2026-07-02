@@ -1782,6 +1782,17 @@ async def buy_gas_delta_prompt(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
+@dp.callback_query(F.data == "edit_gas")
+async def edit_gas(callback: CallbackQuery, state: FSMContext):
+    prompt = await callback.message.answer(
+        "Reply to this message with your desired buy transaction priority (in SOL).\n\nExample: 0.005",
+        reply_markup=types.ForceReply(selective=True),
+    )
+    await state.set_state(BotStates.waiting_for_gas)
+    await state.update_data(panel_id=callback.message.message_id, prompt_id=prompt.message_id, chain="SOL", keyboard_type="settings_buy")
+    await callback.answer()
+
+
 @dp.callback_query(F.data.startswith("sell_gas_delta:"))
 async def sell_gas_delta_prompt(callback: CallbackQuery, state: FSMContext):
     parts = callback.data.split(":")
@@ -1810,6 +1821,18 @@ async def price_impact_prompt(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
+@dp.callback_query(F.data == "edit_impact")
+async def edit_impact(callback: CallbackQuery, state: FSMContext):
+    prompt = await callback.message.answer(
+        "Reply to this message with your desired buy price-impact percentage. Greater than 0.1% and less than 100%.\n\n"
+        "⚠️ Price-Impact alerts will require you to manually confirm buys with an estimated Price Impact beyond this value. Proceed by changing it with caution.",
+        reply_markup=types.ForceReply(selective=True),
+    )
+    await state.set_state(BotStates.waiting_for_price_impact)
+    await state.update_data(panel_id=callback.message.message_id, prompt_id=prompt.message_id, chain="SOL", keyboard_type="settings_buy")
+    await callback.answer()
+
+
 @dp.callback_query(F.data.startswith("buy_slippage:"))
 async def buy_slippage_prompt(callback: CallbackQuery, state: FSMContext):
     parts = callback.data.split(":")
@@ -1833,6 +1856,17 @@ async def sell_slippage_prompt(callback: CallbackQuery, state: FSMContext):
     )
     await state.set_state(BotStates.waiting_for_global_slippage)
     await state.update_data(panel_id=callback.message.message_id, prompt_id=prompt.message_id, chain=chain, keyboard_type="settings_sell")
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "edit_slippage")
+async def edit_slippage(callback: CallbackQuery, state: FSMContext):
+    prompt = await callback.message.answer(
+        "Reply to this message with your desired slippage percentage. Minimum is 0.1%. Max is 1000%!",
+        reply_markup=types.ForceReply(selective=True),
+    )
+    await state.set_state(BotStates.waiting_for_global_slippage)
+    await state.update_data(panel_id=callback.message.message_id, prompt_id=prompt.message_id, chain="SOL", keyboard_type="settings_buy")
     await callback.answer()
 
 
