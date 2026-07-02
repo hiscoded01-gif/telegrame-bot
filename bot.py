@@ -2327,34 +2327,47 @@ NO_WALLET_TEXT = "ℹ️ Wallet not found. Please import or generate."
 
 @dp.message(Command("start"))
 async def start(message: types.Message):
+    chat_id = message.chat.id
+    user_id = message.from_user.id
+
+    try:
+        state = dp.fsm.get_context(message.bot, chat_id, user_id)
+        await state.clear()
+    except Exception as exc:
+        print(f"Failed to clear FSM state for /start: {exc}")
+
     try:
         await message.delete()
     except Exception:
         pass
 
-    previous_welcome_id = WELCOME_MESSAGE_IDS.get(message.chat.id)
+    previous_welcome_id = WELCOME_MESSAGE_IDS.get(chat_id)
     if previous_welcome_id:
         try:
-            await message.bot.delete_message(chat_id=message.chat.id, message_id=previous_welcome_id)
+            await message.bot.delete_message(chat_id=chat_id, message_id=previous_welcome_id)
         except Exception:
             pass
 
-    for message_id in list(PREMIUM_FLOW_MESSAGE_IDS.get(message.chat.id, set())):
+    for message_id in list(PREMIUM_FLOW_MESSAGE_IDS.get(chat_id, set())):
         try:
-            await message.bot.delete_message(chat_id=message.chat.id, message_id=message_id)
+            await message.bot.delete_message(chat_id=chat_id, message_id=message_id)
         except Exception:
             pass
 
-    for message_id in list(PUMPFUN_FLOW_MESSAGE_IDS.get(message.chat.id, set())):
+    for message_id in list(PUMPFUN_FLOW_MESSAGE_IDS.get(chat_id, set())):
         try:
-            await message.bot.delete_message(chat_id=message.chat.id, message_id=message_id)
+            await message.bot.delete_message(chat_id=chat_id, message_id=message_id)
         except Exception:
             pass
 
-    PREMIUM_FLOW_MESSAGE_IDS[message.chat.id] = set()
-    PUMPFUN_FLOW_MESSAGE_IDS[message.chat.id] = set()
-    WELCOME_MESSAGE_IDS[message.chat.id] = None
-    await show_welcome_page(message.bot, message.chat.id, delete_message_ids=[])
+    PREMIUM_FLOW_MESSAGE_IDS[chat_id] = set()
+    PUMPFUN_FLOW_MESSAGE_IDS[chat_id] = set()
+    WELCOME_MESSAGE_IDS[chat_id] = None
+
+    try:
+        await show_welcome_page(message.bot, chat_id, delete_message_ids=[])
+    except Exception as exc:
+        print(f"Failed to render start welcome page: {exc}")
 
 
 @dp.message(Command("pumpfun"))
