@@ -3502,7 +3502,7 @@ async def handle_buttons(callback: types.CallbackQuery, state: FSMContext):
     if data in {"chains", "manage_chains"}:
         await render_chains_menu(callback, callback.from_user.id)
 
-    elif data in {"wallet_no_wallet", "wallets", "manage_wallets"}:
+    elif data in {"wallet_no_wallet", "wallets", "manage_wallets", "active_orders", "positions", "auto_snipe"}:
         await callback.message.edit_text(
             text=NO_WALLET_TEXT,
             parse_mode="HTML",
@@ -3632,12 +3632,6 @@ async def handle_buttons(callback: types.CallbackQuery, state: FSMContext):
     elif data == "copytrade_subscribe_premium":
         await render_premium_menu(callback.bot, callback.message.chat.id, callback.message.message_id)
         await callback.answer()
-    elif data == "active_orders":
-        await callback.answer(popup_alert("Need wallet!", "Import or generate one to trade.", "/start"), show_alert=True)
-    elif data == "positions":
-        await callback.answer(popup_alert("Need wallet!", "Import or generate one to trade.", "/start"), show_alert=True)
-    elif data == "auto_snipe":
-        await callback.answer(popup_alert("Need wallet!", "Import or generate one to trade.", "/start"), show_alert=True)
     elif data == "bridge":
         await callback.answer(popup_alert("Need wallet!", "Import or generate one to trade.", "/start"), show_alert=True)
     elif data == "premium":
