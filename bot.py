@@ -2615,7 +2615,6 @@ BOT_COMMANDS = [
     BotCommand(command="pumpfun", description="Open Pumpfun tools"),
     BotCommand(command="premium", description="Open premium options"),
     BotCommand(command="chains", description="Manage chains and wallets"),
-    BotCommand(command="bridge", description="Open cross-chain bridge"),
 ]
 
 
@@ -2633,13 +2632,16 @@ async def start(message: types.Message):
 
     try:
         state = dp.fsm.get_context(message.bot, chat_id, user_id)
-        await state.finish()
-    except Exception:
-        try:
-            state = dp.fsm.get_context(message.bot, chat_id, user_id)
-            await state.clear()
-        except Exception as exc:
-            print(f"Failed to clear FSM state for /start: {exc}")
+        state_data = await state.get_data()
+        prompt_message_id = state_data.get("prompt_message_id")
+        if prompt_message_id:
+            try:
+                await message.bot.delete_message(chat_id=chat_id, message_id=prompt_message_id)
+            except Exception:
+                pass
+        await state.clear()
+    except Exception as exc:
+        print(f"Failed to clear FSM state for /start: {exc}")
 
     try:
         await message.delete()
@@ -2647,6 +2649,11 @@ async def start(message: types.Message):
         pass
 
     previous_welcome_id = WELCOME_MESSAGE_IDS.get(chat_id)
+    if previous_welcome_id:
+        try:
+            await message.bot.delete_message(chat_id=chat_id, message_id=previous_welcome_id)
+        except Exception:
+            pass
 
     for message_id in list(PREMIUM_FLOW_MESSAGE_IDS.get(chat_id, set())):
         try:
@@ -2662,21 +2669,10 @@ async def start(message: types.Message):
 
     PREMIUM_FLOW_MESSAGE_IDS[chat_id] = set()
     PUMPFUN_FLOW_MESSAGE_IDS[chat_id] = set()
+    WELCOME_MESSAGE_IDS[chat_id] = None
 
     try:
-        if previous_welcome_id:
-            welcome_text, use_html = await get_user_message_text(chat_id, MAIN_WELCOME_TEXT, html_supported=True)
-            await message.bot.edit_message_text(
-                chat_id=chat_id,
-                message_id=previous_welcome_id,
-                text=welcome_text,
-                parse_mode="HTML" if use_html else None,
-                reply_markup=get_main_keyboard(chat_id),
-                disable_web_page_preview=True,
-            )
-            WELCOME_MESSAGE_IDS[chat_id] = previous_welcome_id
-        else:
-            await show_welcome_page(message.bot, chat_id, delete_message_ids=[])
+        await show_welcome_page(message.bot, chat_id, delete_message_ids=[])
     except Exception as exc:
         print(f"Failed to render start welcome page: {exc}")
 
@@ -2684,24 +2680,6 @@ async def start(message: types.Message):
 @dp.message(Command("chains"))
 async def chains_command(message: types.Message):
     await render_chains_menu(message, message.from_user.id)
-
-
-@dp.message(Command("bridge"))
-async def bridge_command(message: types.Message):
-    await bridge_entry(
-        CallbackQuery(
-            id="",
-            from_user=message.from_user,
-            chat_instance="",
-            data="bridge",
-            message=message,
-            bot=message.bot,
-            inline_message_id=None,
-            game_short_name=None,
-            chat=None,
-            sender_chat=None,
-        )
-    )
 
 
 @dp.message(Command("pumpfun"))
