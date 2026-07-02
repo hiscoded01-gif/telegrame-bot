@@ -2221,12 +2221,14 @@ def get_bridge_chain_display(chain_name: str | None) -> str:
 def get_bridge_wallet_label(wallet: dict | None) -> str:
     if not wallet:
         return "Not configured"
-    if wallet.get("wallet_name"):
-        return wallet["wallet_name"]
+    wallet_name = wallet.get("wallet_name")
+    if wallet_name:
+        return f"💳 <i>{escape(str(wallet_name))}</i>"
     address = wallet.get("address") or ""
     if address:
-        return address[:6] + "..." + address[-4:]
-    return "Configured"
+        compact = address[:6] + "..." + address[-4:]
+        return f"💳 <i>{escape(compact)}</i>"
+    return "Not configured"
 
 
 def get_available_bridge_wallets(user_id: int, chain_name: str | None) -> list[dict]:
@@ -2260,16 +2262,33 @@ def get_bridge_keyboard() -> InlineKeyboardMarkup:
 
 def build_bridge_text(user_id: int) -> str:
     state = get_bridge_state(user_id)
-    sender_display = get_bridge_wallet_label(state.get("sender"))
-    receiver_display = get_bridge_wallet_label(state.get("receiver"))
+    from_chain = (state.get("from_chain") or "BSC").upper()
+    to_chain = (state.get("to_chain") or "SOL").upper()
+    source_asset = "BNB" if from_chain == "BSC" else "SOL"
+    dest_asset = "SOL" if to_chain == "SOL" else "BNB"
+
+    sender_value = get_bridge_wallet_label(state.get("sender"))
+    recipient_value = get_bridge_wallet_label(state.get("receiver"))
+
+    if sender_value == "Not configured":
+        sender_display = "Not configured"
+    else:
+        sender_display = sender_value
+
+    if recipient_value == "Not configured":
+        recipient_display = "Not configured"
+    else:
+        recipient_display = recipient_value
+
     return (
-        "Select source and destination chains below. Native token is selected by default for each chain.\n"
-        "Configure your wallets using the buttons below.\n"
-        "Click Get Quote to proceed.\n\n"
-        f"Bridging from {get_bridge_chain_display(state.get('from_chain'))} to {get_bridge_chain_display(state.get('to_chain'))}.\n"
-        f"📤 Sending Wallet | {sender_display} 📥 Recipient Wallet | {receiver_display}\n"
-        "⚡️ Powered by deBridge\n"
-        "ℹ️ This is a non-private bridge. For a private option, go to /private."
+        "1. Select source and destination chains below. Native token is selected by default for each chain.\n"
+        "2. Configure your wallets using the buttons below.\n"
+        "3. Click Get Quote to proceed.\n\n"
+        f"Bridging from <b>{source_asset} ({from_chain})</b> to <b>{dest_asset} ({to_chain})</b>.\n\n"
+        f"📤 Sending Wallet | {sender_display}\n"
+        f"📥 Recipient Wallet | {recipient_display}\n\n"
+        "⚡️ Powered by deBridge\n\n"
+        "<i>This is a non-private bridge. For a private option, go to /private.</i>"
     )
 
 
@@ -2278,6 +2297,7 @@ async def render_bridge_page(bot: Bot, chat_id: int, message_id: int, user_id: i
         chat_id=chat_id,
         message_id=message_id,
         text=build_bridge_text(user_id),
+        parse_mode="HTML",
         reply_markup=get_bridge_keyboard(),
     )
 
@@ -3725,6 +3745,7 @@ async def bridge_get_quote(callback: CallbackQuery):
     if from_chain not in BRIDGE_CHAIN_META or to_chain not in BRIDGE_CHAIN_META:
         await callback.message.edit_text(
             text="❌ Select valid chains.\n\n" + build_bridge_text(callback.from_user.id),
+            parse_mode="HTML",
             reply_markup=get_bridge_keyboard(),
         )
         await callback.answer()
@@ -3733,6 +3754,7 @@ async def bridge_get_quote(callback: CallbackQuery):
     if not sender or not receiver:
         await callback.message.edit_text(
             text="❌ Configure wallets first.\n\n" + build_bridge_text(callback.from_user.id),
+            parse_mode="HTML",
             reply_markup=get_bridge_keyboard(),
         )
         await callback.answer()
@@ -3743,6 +3765,7 @@ async def bridge_get_quote(callback: CallbackQuery):
     except Exception:
         await callback.message.edit_text(
             text="❌ Failed to fetch quote. Try again.\n\n" + build_bridge_text(callback.from_user.id),
+            parse_mode="HTML",
             reply_markup=get_bridge_keyboard(),
         )
         await callback.answer()
@@ -3753,14 +3776,22 @@ async def bridge_get_quote(callback: CallbackQuery):
     time_value = _extract_bridge_field(quote_data, "executionTime", "time", "estimatedTime") or "N/A"
 
     result_text = (
-        f"Bridging from {get_bridge_chain_display(from_chain)} to {get_bridge_chain_display(to_chain)}\n"
-        f"📤 Sending Wallet | {sender.get('address')} 📥 Receiving Wallet | {receiver.get('address')}\n"
-        f"Estimated Output: {output_value} Fees: {fee_value} Time: {time_value}\n"
-        "⚡️ Powered by deBridge"
+        "1. Select source and destination chains below. Native token is selected by default for each chain.\n"
+        "2. Configure your wallets using the buttons below.\n"
+        "3. Click Get Quote to proceed.\n\n"
+        f"Bridging from <b>{from_chain}</b> to <b>{to_chain}</b>.\n\n"
+        f"📤 Sending Wallet | {sender.get('address', 'Not configured')}\n"
+        f"📥 Recipient Wallet | {receiver.get('address', 'Not configured')}\n\n"
+        f"Estimated Output: {output_value}\n"
+        f"Fees: {fee_value}\n"
+        f"Time: {time_value}\n\n"
+        "⚡️ Powered by deBridge\n\n"
+        "<i>This is a non-private bridge. For a private option, go to /private.</i>"
     )
 
     await callback.message.edit_text(
         text=result_text,
+        parse_mode="HTML",
         reply_markup=get_bridge_keyboard(),
     )
     await callback.answer()
