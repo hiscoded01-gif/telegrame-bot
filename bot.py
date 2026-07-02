@@ -2336,12 +2336,17 @@ async def render_chains_menu(target, user_id: int):
         await target.answer(text=localized_text, reply_markup=keyboard)
 
 
+BOT_COMMANDS = [
+    BotCommand(command="start", description="Start the bot"),
+    BotCommand(command="pumpfun", description="Open Pumpfun tools"),
+    BotCommand(command="premium", description="Open premium options"),
+    BotCommand(command="chains", description="Manage chains and wallets"),
+]
+
+
 async def register_bot_commands():
     try:
-        await bot.set_my_commands([
-            BotCommand(command="start", description="Start the bot"),
-            BotCommand(command="chains", description="Manage chains and wallets"),
-        ])
+        await bot.set_my_commands(BOT_COMMANDS)
     except Exception as exc:
         print(f"Failed to register bot commands: {exc}")
 
