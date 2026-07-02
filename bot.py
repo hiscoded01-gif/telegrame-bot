@@ -88,6 +88,7 @@ router = Router()
 class BotStates(StatesGroup):
     waiting_for_slippage = State()
     waiting_for_gas = State()
+    waiting_for_price_impact = State()
     waiting_for_global_slippage = State()
 
 LANGUAGE_OPTIONS = {
@@ -1654,9 +1655,42 @@ async def toggle_anti_mev(callback: CallbackQuery):
 async def toggle_degen_mode(callback: CallbackQuery):
     chain = callback.data.split(":", 1)[1].upper()
     settings = get_chain_settings(chain)
-    settings["degen_mode"] = not settings["degen_mode"]
+
+    if not settings["degen_mode"]:
+        confirmation_text = (
+            "By enabling Degen Mode 😈, the bot will no longer block autobuy if it detects honeypots, blacklist risks, or unhealthy liquidity. Only enable this if you know what you’re doing."
+        )
+        await callback.answer(text=confirmation_text, show_alert=True)
+        await callback.message.edit_text(
+            text=confirmation_text,
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [
+                    InlineKeyboardButton(text="✅ Confirm", callback_data=f"confirm_degen_mode:{chain}"),
+                    InlineKeyboardButton(text="❌ Cancel", callback_data=f"cancel_degen_mode:{chain}"),
+                ]
+            ]),
+        )
+        return
+
+    settings["degen_mode"] = False
     await render_general_settings_page(callback, chain)
     await callback.answer()
+
+
+@dp.callback_query(F.data.startswith("confirm_degen_mode:"))
+async def confirm_degen_mode(callback: CallbackQuery):
+    chain = callback.data.split(":", 1)[1].upper()
+    settings = get_chain_settings(chain)
+    settings["degen_mode"] = True
+    await render_general_settings_page(callback, chain)
+    await callback.answer("Degen Mode enabled")
+
+
+@dp.callback_query(F.data.startswith("cancel_degen_mode:"))
+async def cancel_degen_mode(callback: CallbackQuery):
+    chain = callback.data.split(":", 1)[1].upper()
+    await render_general_settings_page(callback, chain)
+    await callback.answer("Cancelled")
 
 
 @dp.callback_query(F.data.startswith("config_global_buy:"))
@@ -1762,8 +1796,18 @@ async def sell_gas_delta_prompt(callback: CallbackQuery, state: FSMContext):
 
 
 @dp.callback_query(F.data.startswith("price_impact:"))
-async def price_impact_unavailable(callback: CallbackQuery):
-    await callback.answer(popup_alert("Unavailable!", "This setting is not ready yet.", "/start"), show_alert=True)
+async def price_impact_prompt(callback: CallbackQuery, state: FSMContext):
+    parts = callback.data.split(":")
+    chain = parts[-1].upper()
+    keyboard_type = "settings_sell" if "📌 Sell" in (callback.message.text or "") else "settings_buy"
+    prompt = await callback.message.answer(
+        "Reply to this message with your desired buy price-impact percentage. Greater than 0.1% and less than 100%.\n\n"
+        "⚠️ Price-Impact alerts will require you to manually confirm buys with an estimated Price Impact beyond this value. Proceed by changing it with caution.",
+        reply_markup=types.ForceReply(selective=True),
+    )
+    await state.set_state(BotStates.waiting_for_price_impact)
+    await state.update_data(panel_id=callback.message.message_id, prompt_id=prompt.message_id, chain=chain, keyboard_type=keyboard_type)
+    await callback.answer()
 
 
 @dp.callback_query(F.data.startswith("buy_slippage:"))
@@ -2881,7 +2925,13 @@ async def _prompt_config_value(callback: types.CallbackQuery, state: FSMContext,
         keyboard_type=keyboard_type,
     )
 
-    next_state = BotStates.waiting_for_slippage if config_key == "slippage" else BotStates.waiting_for_gas
+    if config_key == "slippage":
+        next_state = BotStates.waiting_for_slippage
+    elif config_key == "price_impact":
+        next_state = BotStates.waiting_for_price_impact
+    else:
+        next_state = BotStates.waiting_for_gas
+
     await state.set_state(next_state)
     await callback.answer()
 
@@ -2929,6 +2979,7 @@ async def process_slippage_input(message: types.Message, state: FSMContext):
     mint_address = state_data.get("mint_address")
     chat_id = state_data.get("chat_id")
     keyboard_type = state_data.get("keyboard_type", "monitor")
+    chain = state_data.get("chain") or "SOL"
 
     if prompt_id:
         try:
@@ -2943,23 +2994,34 @@ async def process_slippage_input(message: types.Message, state: FSMContext):
 
     clean_input = (message.text or "").replace("%", "").strip()
     try:
-        numeric_value = int(clean_input)
+        numeric_value = float(clean_input)
     except ValueError:
-        await message.answer("❌ Failed Slippage setup. Please enter a whole number from 1 to 50.")
+        await message.answer("❌ Invalid slippage. Please enter a number from 0.1 to 1000.")
+        await state.clear()
         return
 
-    if not (1 <= numeric_value <= 50):
-        await message.answer("❌ Failed Slippage setup. Please enter a whole number from 1 to 50.")
+    if not (0.1 <= numeric_value <= 1000):
+        await message.answer("❌ Invalid slippage. Please enter a number from 0.1 to 1000.")
+        await state.clear()
         return
 
     user_id = message.from_user.id
     USER_CONFIGS[user_id] = get_user_data(user_id)
-    USER_CONFIGS[user_id]["slippage"] = f"{numeric_value}%"
+    USER_CONFIGS[user_id]["slippage"] = f"{numeric_value:g}%"
+    if chain and chain.upper() in CHAIN_GLOBAL_SETTINGS:
+        get_chain_settings(chain.upper())["slippage"] = numeric_value
     print(f"Slippage updated for user {user_id}: {numeric_value}%")
 
     if panel_id and chat_id:
         try:
-            reply_markup = get_monitor_keyboard(user_id, mint_address) if keyboard_type == "monitor" else get_trading_keyboard(user_id)
+            if keyboard_type == "settings_buy":
+                reply_markup = get_buy_settings_keyboard(chain.upper())
+            elif keyboard_type == "settings_sell":
+                reply_markup = get_sell_settings_keyboard(chain.upper())
+            elif keyboard_type == "monitor":
+                reply_markup = get_monitor_keyboard(user_id, mint_address)
+            else:
+                reply_markup = get_trading_keyboard(user_id)
             await message.bot.edit_message_reply_markup(
                 chat_id=chat_id,
                 message_id=panel_id,
@@ -2981,7 +3043,7 @@ async def prompt_gas_from_trade(callback: types.CallbackQuery, state: FSMContext
         state,
         "gas",
         mint_address,
-        "Reply to this message with your desired sell transaction priority (in SOL).\n\n"
+        "Reply to this message with your desired buy transaction priority (in SOL).\n\n"
         "Example: 0.005\n\n"
         "⚠️ This will only impact manual buys and sells initiated through this panel.",
         "trading",
@@ -3001,11 +3063,64 @@ async def prompt_gas(callback: types.CallbackQuery, state: FSMContext):
         state,
         "gas",
         mint_address,
-        "Reply to this message with your desired sell transaction priority (in SOL).\n\n"
+        "Reply to this message with your desired buy transaction priority (in SOL).\n\n"
         "Example: 0.005\n\n"
         "⚠️ This will only impact manual buys and sells initiated through this panel.",
         "monitor",
     )
+
+
+@dp.message(BotStates.waiting_for_price_impact)
+async def process_price_impact_input(message: types.Message, state: FSMContext):
+    state_data = await state.get_data()
+    prompt_id = state_data.get("prompt_id")
+    panel_id = state_data.get("panel_id")
+    chat_id = state_data.get("chat_id")
+    keyboard_type = state_data.get("keyboard_type", "settings_buy")
+    chain = state_data.get("chain") or "SOL"
+
+    if prompt_id:
+        try:
+            await message.bot.delete_message(chat_id=message.chat.id, message_id=prompt_id)
+        except Exception:
+            pass
+
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
+    clean_input = (message.text or "").replace("%", "").strip()
+    try:
+        numeric_value = float(clean_input)
+    except ValueError:
+        await message.answer("❌ Invalid price impact. Please enter a number greater than 0.1 and less than 100.")
+        await state.clear()
+        return
+
+    if not (0.1 < numeric_value < 100):
+        await message.answer("❌ Invalid price impact. Please enter a number greater than 0.1 and less than 100.")
+        await state.clear()
+        return
+
+    settings = get_chain_settings(chain.upper())
+    settings["price_impact"] = numeric_value
+
+    if panel_id and chat_id:
+        try:
+            if keyboard_type == "settings_sell":
+                reply_markup = get_sell_settings_keyboard(chain.upper())
+            else:
+                reply_markup = get_buy_settings_keyboard(chain.upper())
+            await message.bot.edit_message_reply_markup(
+                chat_id=chat_id,
+                message_id=panel_id,
+                reply_markup=reply_markup,
+            )
+        except Exception as e:
+            print(f"Error refreshing price impact panel layout: {e}")
+
+    await state.clear()
 
 
 @dp.message(BotStates.waiting_for_gas)
@@ -3032,11 +3147,13 @@ async def process_gas_input(message: types.Message, state: FSMContext):
     try:
         val = float(raw_value)
     except ValueError:
-        await message.answer("❌ Failed Gas setup. Please enter a value from 0.002 to 50.0 SOL.")
+        await message.answer("❌ Failed Gas setup. Please enter a value from 0.005 to 1000 SOL.")
+        await state.clear()
         return
 
-    if not (0.002 <= val <= 50.0):
-        await message.answer("❌ Failed Gas setup. Please enter a value from 0.002 to 50.0 SOL.")
+    if not (0.005 <= val <= 1000):
+        await message.answer("❌ Failed Gas setup. Please enter a value from 0.005 to 1000 SOL.")
+        await state.clear()
         return
 
     user_id = message.from_user.id
