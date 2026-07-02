@@ -2194,6 +2194,166 @@ def get_rearrange_keyboard(user_id=None):
     ])
 
 
+BRIDGE_USER_STATE: dict[int, dict] = {}
+BRIDGE_SUPPORTED_CHAINS = ("BSC", "SOL")
+BRIDGE_CHAIN_META = {
+    "BSC": {"label": "BNB", "display": "BNB (BSC)", "chain_id": 56, "token_address": "0x0000000000000000000000000000000000000000"},
+    "SOL": {"label": "SOL", "display": "SOL (SOL)", "chain_id": 7565164, "token_address": "11111111111111111111111111111111111111111"},
+}
+
+
+def get_bridge_state(user_id: int) -> dict:
+    if user_id not in BRIDGE_USER_STATE:
+        BRIDGE_USER_STATE[user_id] = {
+            "from_chain": "BSC",
+            "to_chain": "SOL",
+            "sender": None,
+            "receiver": None,
+        }
+    return BRIDGE_USER_STATE[user_id]
+
+
+def get_bridge_chain_display(chain_name: str | None) -> str:
+    chain_key = (chain_name or "BSC").upper()
+    return BRIDGE_CHAIN_META.get(chain_key, BRIDGE_CHAIN_META["BSC"])["display"]
+
+
+def get_bridge_wallet_label(wallet: dict | None) -> str:
+    if not wallet:
+        return "Not configured"
+    if wallet.get("wallet_name"):
+        return wallet["wallet_name"]
+    address = wallet.get("address") or ""
+    if address:
+        return address[:6] + "..." + address[-4:]
+    return "Configured"
+
+
+def get_available_bridge_wallets(user_id: int, chain_name: str | None) -> list[dict]:
+    chain_key = (chain_name or "BSC").upper()
+    wallets: list[dict] = []
+    if chain_key in BRIDGE_SUPPORTED_CHAINS:
+        current_wallet = user_wallets.get(user_id)
+        if current_wallet and current_wallet.get("chain") == chain_key:
+            wallets.append(current_wallet)
+        for wallet in wallet_inventory.get(chain_key, []):
+            if wallet not in wallets:
+                wallets.append(wallet)
+    return wallets
+
+
+def get_bridge_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🔗 BNB", callback_data="bridge_cycle_source"),
+            InlineKeyboardButton(text="🔁", callback_data="bridge_swap"),
+            InlineKeyboardButton(text="🔗 SOL", callback_data="bridge_cycle_destination"),
+        ],
+        [
+            InlineKeyboardButton(text="📤 Sending Wallet", callback_data="bridge_config_sender"),
+            InlineKeyboardButton(text="📥 Receiving Wallet", callback_data="bridge_config_receiver"),
+        ],
+        [InlineKeyboardButton(text="🧾 Get Quote", callback_data="bridge_get_quote")],
+        [InlineKeyboardButton(text="❌ Close", callback_data="bridge_close")],
+    ])
+
+
+def build_bridge_text(user_id: int) -> str:
+    state = get_bridge_state(user_id)
+    sender_display = get_bridge_wallet_label(state.get("sender"))
+    receiver_display = get_bridge_wallet_label(state.get("receiver"))
+    return (
+        "Select source and destination chains below. Native token is selected by default for each chain.\n"
+        "Configure your wallets using the buttons below.\n"
+        "Click Get Quote to proceed.\n\n"
+        f"Bridging from {get_bridge_chain_display(state.get('from_chain'))} to {get_bridge_chain_display(state.get('to_chain'))}.\n"
+        f"📤 Sending Wallet | {sender_display} 📥 Recipient Wallet | {receiver_display}\n"
+        "⚡️ Powered by deBridge\n"
+        "ℹ️ This is a non-private bridge. For a private option, go to /private."
+    )
+
+
+async def render_bridge_page(bot: Bot, chat_id: int, message_id: int, user_id: int) -> None:
+    await bot.edit_message_text(
+        chat_id=chat_id,
+        message_id=message_id,
+        text=build_bridge_text(user_id),
+        reply_markup=get_bridge_keyboard(),
+    )
+
+
+async def render_bridge_wallet_selector(callback: CallbackQuery, role: str) -> None:
+    state = get_bridge_state(callback.from_user.id)
+    chain_name = state.get("from_chain") if role == "sender" else state.get("to_chain")
+    wallets = get_available_bridge_wallets(callback.from_user.id, chain_name)
+
+    if not wallets:
+        await callback.message.edit_text(
+            text="No wallets are available for this chain yet. Configure one in the wallet flow first.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Return", callback_data="bridge")]]),
+        )
+        await callback.answer()
+        return
+
+    builder = InlineKeyboardBuilder()
+    for wallet in wallets:
+        address = wallet.get("address") or ""
+        label = wallet.get("wallet_name") or (address[:6] + "..." + address[-4:] if address else "Wallet")
+        builder.button(text=label, callback_data=f"bridge_select_wallet:{role}:{address}")
+    builder.button(text="Return", callback_data="bridge")
+    builder.adjust(1)
+
+    await callback.message.edit_text(
+        text=f"Choose a wallet for the {role} side.",
+        reply_markup=builder.as_markup(),
+    )
+    await callback.answer()
+
+
+async def _fetch_bridge_quote(source_chain: str, destination_chain: str, sender_address: str, receiver_address: str) -> dict:
+    chain_meta_source = BRIDGE_CHAIN_META[source_chain]
+    chain_meta_destination = BRIDGE_CHAIN_META[destination_chain]
+
+    payload = {
+        "srcChainId": chain_meta_source["chain_id"],
+        "dstChainId": chain_meta_destination["chain_id"],
+        "srcChainTokenIn": chain_meta_source["token_address"],
+        "srcChainTokenInAmount": "10000000000000000",
+        "senderAddress": sender_address,
+        "dstChainTokenOutRecipient": receiver_address,
+    }
+
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20)) as session:
+        async with session.post(
+            "https://dln.debridge.finance/v1.0/dln/order/create-tx",
+            json=payload,
+            headers={"accept": "application/json", "content-type": "application/json"},
+        ) as response:
+            if response.status >= 400:
+                raise RuntimeError(f"dln request failed: {response.status}")
+            return await response.json()
+
+
+def _extract_bridge_field(data: object, *keys: str) -> str | None:
+    if isinstance(data, dict):
+        for key in keys:
+            if key in data:
+                value = data[key]
+                if value is not None:
+                    return str(value)
+        for value in data.values():
+            if isinstance(value, (dict, list)):
+                nested = _extract_bridge_field(value, *keys)
+                if nested is not None:
+                    return nested
+    elif isinstance(data, list):
+        for item in data:
+            nested = _extract_bridge_field(item, *keys)
+            if nested is not None:
+                return nested
+    return None
+
+
 WELCOME_MESSAGE_IDS = {}
 PREMIUM_FLOW_MESSAGE_IDS = {}
 PUMPFUN_FLOW_MESSAGE_IDS = {}
@@ -3491,6 +3651,129 @@ async def premium_try_again(callback: types.CallbackQuery):
     await show_welcome_page(callback.bot, chat_id, delete_message_ids=[callback.message.message_id])
     PREMIUM_FLOW_MESSAGE_IDS[chat_id] = {welcome_message_id} if welcome_message_id else set()
     await callback.answer("Restarted premium flow")
+
+
+@dp.callback_query(F.data == "bridge")
+async def bridge_entry(callback: CallbackQuery):
+    await render_bridge_page(callback.bot, callback.message.chat.id, callback.message.message_id, callback.from_user.id)
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "bridge_cycle_source")
+async def bridge_cycle_source(callback: CallbackQuery):
+    state = get_bridge_state(callback.from_user.id)
+    state["from_chain"] = "SOL" if state.get("from_chain") != "SOL" else "BSC"
+    await render_bridge_page(callback.bot, callback.message.chat.id, callback.message.message_id, callback.from_user.id)
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "bridge_cycle_destination")
+async def bridge_cycle_destination(callback: CallbackQuery):
+    state = get_bridge_state(callback.from_user.id)
+    state["to_chain"] = "SOL" if state.get("to_chain") != "SOL" else "BSC"
+    await render_bridge_page(callback.bot, callback.message.chat.id, callback.message.message_id, callback.from_user.id)
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "bridge_swap")
+async def bridge_swap(callback: CallbackQuery):
+    state = get_bridge_state(callback.from_user.id)
+    state["from_chain"], state["to_chain"] = state.get("to_chain"), state.get("from_chain")
+    await render_bridge_page(callback.bot, callback.message.chat.id, callback.message.message_id, callback.from_user.id)
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "bridge_config_sender")
+async def bridge_config_sender(callback: CallbackQuery):
+    await render_bridge_wallet_selector(callback, "sender")
+
+
+@dp.callback_query(F.data == "bridge_config_receiver")
+async def bridge_config_receiver(callback: CallbackQuery):
+    await render_bridge_wallet_selector(callback, "receiver")
+
+
+@dp.callback_query(F.data.startswith("bridge_select_wallet:"))
+async def bridge_select_wallet(callback: CallbackQuery):
+    _, role, address = callback.data.split(":", 2)
+    state = get_bridge_state(callback.from_user.id)
+    wallet = None
+    for candidate in get_available_bridge_wallets(callback.from_user.id, state.get("from_chain") if role == "sender" else state.get("to_chain")):
+        if candidate.get("address") == address:
+            wallet = candidate
+            break
+    if wallet is None:
+        wallet = {"address": address, "wallet_name": address, "chain": (state.get("from_chain") if role == "sender" else state.get("to_chain"))}
+
+    if role == "sender":
+        state["sender"] = wallet
+    else:
+        state["receiver"] = wallet
+
+    await render_bridge_page(callback.bot, callback.message.chat.id, callback.message.message_id, callback.from_user.id)
+    await callback.answer("Wallet selected")
+
+
+@dp.callback_query(F.data == "bridge_get_quote")
+async def bridge_get_quote(callback: CallbackQuery):
+    state = get_bridge_state(callback.from_user.id)
+    sender = state.get("sender")
+    receiver = state.get("receiver")
+    from_chain = (state.get("from_chain") or "BSC").upper()
+    to_chain = (state.get("to_chain") or "SOL").upper()
+
+    if from_chain not in BRIDGE_CHAIN_META or to_chain not in BRIDGE_CHAIN_META:
+        await callback.message.edit_text(
+            text="❌ Select valid chains.\n\n" + build_bridge_text(callback.from_user.id),
+            reply_markup=get_bridge_keyboard(),
+        )
+        await callback.answer()
+        return
+
+    if not sender or not receiver:
+        await callback.message.edit_text(
+            text="❌ Configure wallets first.\n\n" + build_bridge_text(callback.from_user.id),
+            reply_markup=get_bridge_keyboard(),
+        )
+        await callback.answer()
+        return
+
+    try:
+        quote_data = await _fetch_bridge_quote(from_chain, to_chain, sender.get("address"), receiver.get("address"))
+    except Exception:
+        await callback.message.edit_text(
+            text="❌ Failed to fetch quote. Try again.\n\n" + build_bridge_text(callback.from_user.id),
+            reply_markup=get_bridge_keyboard(),
+        )
+        await callback.answer()
+        return
+
+    output_value = _extract_bridge_field(quote_data, "estimatedOutput", "toAmount", "dstChainTokenOutAmount", "amountOut") or "N/A"
+    fee_value = _extract_bridge_field(quote_data, "fee", "fees", "estimatedFee") or "N/A"
+    time_value = _extract_bridge_field(quote_data, "executionTime", "time", "estimatedTime") or "N/A"
+
+    result_text = (
+        f"Bridging from {get_bridge_chain_display(from_chain)} to {get_bridge_chain_display(to_chain)}\n"
+        f"📤 Sending Wallet | {sender.get('address')} 📥 Receiving Wallet | {receiver.get('address')}\n"
+        f"Estimated Output: {output_value} Fees: {fee_value} Time: {time_value}\n"
+        "⚡️ Powered by deBridge"
+    )
+
+    await callback.message.edit_text(
+        text=result_text,
+        reply_markup=get_bridge_keyboard(),
+    )
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "bridge_close")
+async def bridge_close(callback: CallbackQuery):
+    try:
+        await callback.message.delete()
+    except Exception:
+        pass
+    await show_welcome_page(callback.bot, callback.message.chat.id, delete_message_ids=[callback.message.message_id])
+    await callback.answer()
 
 
 @dp.callback_query()
