@@ -2403,7 +2403,17 @@ async def show_welcome_page(bot: Bot, chat_id: int, *, delete_message_ids=None):
     previous_welcome_id = WELCOME_MESSAGE_IDS.get(chat_id)
     if previous_welcome_id:
         try:
-            await bot.delete_message(chat_id=chat_id, message_id=previous_welcome_id)
+            welcome_text, use_html = await get_user_message_text(chat_id, MAIN_WELCOME_TEXT, html_supported=True)
+            await bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=previous_welcome_id,
+                text=welcome_text,
+                parse_mode="HTML" if use_html else None,
+                reply_markup=get_main_keyboard(chat_id),
+                disable_web_page_preview=True,
+            )
+            WELCOME_MESSAGE_IDS[chat_id] = previous_welcome_id
+            return await bot.get_message(chat_id=chat_id, message_id=previous_welcome_id)
         except Exception:
             pass
 
@@ -2640,6 +2650,7 @@ async def start(message: types.Message):
             except Exception:
                 pass
         await state.clear()
+        await state.set_state(None)
     except Exception as exc:
         print(f"Failed to clear FSM state for /start: {exc}")
 
@@ -2647,13 +2658,6 @@ async def start(message: types.Message):
         await message.delete()
     except Exception:
         pass
-
-    previous_welcome_id = WELCOME_MESSAGE_IDS.get(chat_id)
-    if previous_welcome_id:
-        try:
-            await message.bot.delete_message(chat_id=chat_id, message_id=previous_welcome_id)
-        except Exception:
-            pass
 
     for message_id in list(PREMIUM_FLOW_MESSAGE_IDS.get(chat_id, set())):
         try:
@@ -2669,10 +2673,9 @@ async def start(message: types.Message):
 
     PREMIUM_FLOW_MESSAGE_IDS[chat_id] = set()
     PUMPFUN_FLOW_MESSAGE_IDS[chat_id] = set()
-    WELCOME_MESSAGE_IDS[chat_id] = None
 
     try:
-        await show_welcome_page(message.bot, chat_id, delete_message_ids=[])
+        await show_welcome_page(message.bot, chat_id, delete_message_ids=[message.message_id])
     except Exception as exc:
         print(f"Failed to render start welcome page: {exc}")
 
