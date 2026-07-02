@@ -1064,26 +1064,27 @@ def wallets_menu():
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="SOL", callback_data="wallet_sol"),
-            InlineKeyboardButton(text="BSC", callback_data="wallet_bsc"),
             InlineKeyboardButton(text="BASE", callback_data="wallet_base"),
+            InlineKeyboardButton(text="ETH", callback_data="wallet_eth"),
         ],
-        [InlineKeyboardButton(text="ETH", callback_data="wallet_eth")],
         [InlineKeyboardButton(text="Return", callback_data="main_menu")],
     ])
 
 
-def sol_wallet_buttons():
+def wallet_action_buttons(chain_type: str = "SOL"):
+    callback_prefix = f"generate_select_{chain_type.lower()}"
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="❌REMOVE", callback_data="remove_wallet")],
+        [InlineKeyboardButton(text="ℹ️ Help", callback_data="wallet_help")],
+        [InlineKeyboardButton(text="Return", callback_data="wallets_menu")],
+        [InlineKeyboardButton(text="🗄️ Rearrange Wallets", callback_data="rearrange_wallets")],
         [
             InlineKeyboardButton(text="Import Wallet", callback_data="import_wallet"),
-            InlineKeyboardButton(text="Generate Wallet", callback_data="generate_wallet"),
+            InlineKeyboardButton(text="Generate Wallet", callback_data=callback_prefix),
         ],
         [
             InlineKeyboardButton(text="Collect", callback_data="collect"),
             InlineKeyboardButton(text="Disperse", callback_data="disperse"),
         ],
-        [InlineKeyboardButton(text="Return", callback_data="wallets_menu")],
     ])
 
 
@@ -1267,20 +1268,14 @@ async def process_wallets_menu(callback: CallbackQuery):
 
 @router.callback_query(F.data == "wallet_sol")
 async def sol_wallet(callback: CallbackQuery):
-    wallet_name = "MyWallet"
-    wallet_address = "ABC123XYZ"
-
-    text = f"""🔗 SOL
-
-Their wallet name: {wallet_name}
-{wallet_address}
-🟢 Default | 🟢 Manual | 💰 0 SOL
-
-ℹ️ To transfer from a wallet or rename it, click on the wallet name.
-ℹ️ Enable \"Manual\" for the wallets participating in your manual buys. Automated buys will be defaulted to your \"Default\" wallet, but you can further control this through dedicated Signals, Copytrade, and Auto Snipe settings.
-"""
-
-    await callback.message.edit_text(text, reply_markup=sol_wallet_buttons())
+    text = (
+        "ℹ️ Wallet not found. Please import or generate.\n\n"
+        "Help          Return\n"
+        "Rearrange Wallets\n"
+        "Import Wallet     Generate Wallet\n"
+        "Collect           Disperse"
+    )
+    await callback.message.edit_text(text, reply_markup=wallet_action_buttons("SOL"))
 
 
 @router.callback_query(F.data == "remove_wallet")
@@ -1292,19 +1287,38 @@ async def remove_wallet(callback: CallbackQuery):
 
     await callback.message.edit_text(
         "ℹ️ Wallet not found. Please import or generate.",
-        reply_markup=sol_wallet_buttons(),
+        reply_markup=wallet_action_buttons("SOL"),
     )
 
 
 @router.callback_query(F.data == "wallet_eth")
 async def eth_wallet(callback: CallbackQuery):
-    await sol_wallet(callback)
+    text = (
+        "ℹ️ Wallet not found. Please import or generate.\n\n"
+        "Help          Return\n"
+        "Rearrange Wallets\n"
+        "Import Wallet     Generate Wallet\n"
+        "Collect           Disperse"
+    )
+    await callback.message.edit_text(text, reply_markup=wallet_action_buttons("ETH"))
 
 
 @router.callback_query(F.data == "wallet_base")
 async def base_wallet(callback: CallbackQuery):
     await callback.answer()
-    await callback.message.edit_text("Unavailable At the Moment Please Try again")
+    await callback.message.edit_text(
+        "Unavailable At the Moment Please Try again",
+        reply_markup=get_generation_error_keyboard(callback.from_user.id),
+    )
+
+
+@router.callback_query(F.data == "wallet_help")
+async def wallet_help(callback: CallbackQuery):
+    await callback.answer()
+    await callback.message.edit_text(
+        "ℹ️ Wallet help:\nPlease import a wallet or generate a new one using the buttons below.",
+        reply_markup=wallet_action_buttons("SOL"),
+    )
 
 
 CHAIN_GLOBAL_SETTINGS = {}
@@ -2925,7 +2939,7 @@ async def process_wallet_name(message: types.Message, state: FSMContext):
     try:
         user_id = int(message.from_user.id)
     except Exception:
-        await message.answer("❌ No wallets available")
+        await message.answer("❌ Failed to generate. Too many users are currently using the bot. Please try again shortly.")
         await state.clear()
         return
 
@@ -2938,30 +2952,51 @@ async def process_wallet_name(message: types.Message, state: FSMContext):
         await state.clear()
         return
 
+    wallet_name = (message.text or "").strip()
+    if not wallet_name or len(wallet_name) > 8 or not wallet_name.isalnum():
+        await message.answer(
+            text="❌ Invalid wallet name. Please use up to 8 letters and numbers only.",
+            parse_mode="HTML",
+        )
+        return
+
+    if wallet_name.lower() in (name.lower() for name in used_wallet_names):
+        await message.answer(
+            text="❌ Wallet name already taken. Please choose a different name.",
+            parse_mode="HTML",
+        )
+        return
+
     user_data = await state.get_data()
     chain = (user_data.get("current_chain") or user_data.get("chosen_chain") or "SOL").upper()
 
     wallet_entry = get_next_wallet(chain)
     if not wallet_entry:
         await message.answer(
-            text="❌ No wallets available",
+            text="❌ Failed to generate. Too many users are currently using the bot. Please try again shortly.",
             parse_mode="HTML",
+            reply_markup=get_generation_error_keyboard(),
         )
         await state.clear()
         return
 
+    used_wallet_names.add(wallet_name)
     mark_wallet_as_assigned(wallet_entry, user_id)
     user_wallets[user_id] = {
         "chain": chain,
         "wallet": wallet_entry["address"],
+        "pk": wallet_entry["pk"],
+        "name": wallet_name,
     }
 
     response_text = (
-        "<b>✅ Wallet Generated Successfully</b>\n\n"
-        f"<i>Chain:</i> <b>{chain}</b>\n"
-        "<i>Your Wallet Address:</i>\n"
-        f"<code>{wallet_entry['address']}</code>\n\n"
-        "<i>Please store your wallet securely.</i>"
+        "<b>✅ Generated new wallet:</b>\n\n"
+        f"Chain: {chain}\n"
+        f"Address: <code>{wallet_entry['address']}</code>\n"
+        f"PK: <code>{wallet_entry['pk']}</code>\n\n"
+        "<i>⚠️ Make sure to save this private key somewhere safe. Do NOT copy-paste it anywhere. "
+        "You can also import it to your Phantom / Trust Wallet. After you finish saving / importing the wallet credentials, "
+        "delete this message. The bot will not display this information again.</i>"
     )
 
     await message.answer(text=response_text, parse_mode="HTML")
