@@ -1769,105 +1769,118 @@ async def sell_kb_unavailable(callback: CallbackQuery):
     await callback.answer(popup_alert("Unavailable!", "Add a wallet first.", "/start"), show_alert=True)
 
 
-@dp.callback_query(F.data.startswith("buy_gas_delta:"))
-async def buy_gas_delta_prompt(callback: CallbackQuery, state: FSMContext):
-    parts = callback.data.split(":")
-    chain = parts[-1].upper()
+async def _start_parameter_prompt(callback: CallbackQuery, state: FSMContext, prompt_text: str, next_state, chain: str, keyboard_type: str):
     prompt = await callback.message.answer(
-        "Reply to this message with your desired gas value in SOL for the buy order.\n\nExample: 0.005",
+        prompt_text,
         reply_markup=types.ForceReply(selective=True),
     )
-    await state.set_state(BotStates.waiting_for_gas)
-    await state.update_data(panel_id=callback.message.message_id, prompt_id=prompt.message_id, chain=chain, keyboard_type="settings_buy")
-    await callback.answer()
-
-
-@dp.callback_query(F.data == "edit_gas")
-async def edit_gas(callback: CallbackQuery, state: FSMContext):
-    prompt = await callback.message.answer(
-        "Reply to this message with your desired buy transaction priority (in SOL).\n\nExample: 0.005",
-        reply_markup=types.ForceReply(selective=True),
-    )
-    await state.set_state(BotStates.waiting_for_gas)
-    await state.update_data(panel_id=callback.message.message_id, prompt_id=prompt.message_id, chain="SOL", keyboard_type="settings_buy")
-    await callback.answer()
-
-
-@dp.callback_query(F.data.startswith("sell_gas_delta:"))
-async def sell_gas_delta_prompt(callback: CallbackQuery, state: FSMContext):
-    parts = callback.data.split(":")
-    chain = parts[-1].upper()
-    prompt = await callback.message.answer(
-        "Reply to this message with your desired gas value in SOL for the sell order.\n\nExample: 0.005",
-        reply_markup=types.ForceReply(selective=True),
-    )
-    await state.set_state(BotStates.waiting_for_gas)
-    await state.update_data(panel_id=callback.message.message_id, prompt_id=prompt.message_id, chain=chain, keyboard_type="settings_sell")
-    await callback.answer()
-
-
-@dp.callback_query(F.data.startswith("price_impact:"))
-async def price_impact_prompt(callback: CallbackQuery, state: FSMContext):
-    parts = callback.data.split(":")
-    chain = parts[-1].upper()
-    keyboard_type = "settings_sell" if "📌 Sell" in (callback.message.text or "") else "settings_buy"
-    prompt = await callback.message.answer(
-        "Reply to this message with your desired buy price-impact percentage. Greater than 0.1% and less than 100%.\n\n"
-        "⚠️ Price-Impact alerts will require you to manually confirm buys with an estimated Price Impact beyond this value. Proceed by changing it with caution.",
-        reply_markup=types.ForceReply(selective=True),
-    )
-    await state.set_state(BotStates.waiting_for_price_impact)
+    await state.set_state(next_state)
     await state.update_data(panel_id=callback.message.message_id, prompt_id=prompt.message_id, chain=chain, keyboard_type=keyboard_type)
     await callback.answer()
 
 
-@dp.callback_query(F.data == "edit_impact")
-async def edit_impact(callback: CallbackQuery, state: FSMContext):
-    prompt = await callback.message.answer(
+@dp.callback_query(F.data.startswith("buy_gas_delta:"))
+async def buy_gas_delta_prompt(callback: CallbackQuery, state: FSMContext):
+    chain = callback.data.split(":", 1)[-1].upper()
+    await _start_parameter_prompt(
+        callback,
+        state,
+        "Reply to this message with your desired gas value in SOL for the buy order.\n\nExample: 0.005",
+        BotStates.waiting_for_gas,
+        chain,
+        "settings_buy",
+    )
+
+
+@dp.callback_query(F.data == "edit_gas")
+async def edit_gas(callback: CallbackQuery, state: FSMContext):
+    await _start_parameter_prompt(
+        callback,
+        state,
+        "Reply to this message with your desired buy transaction priority (in SOL).\n\nExample: 0.005",
+        BotStates.waiting_for_gas,
+        "SOL",
+        "settings_buy",
+    )
+
+
+@dp.callback_query(F.data.startswith("sell_gas_delta:"))
+async def sell_gas_delta_prompt(callback: CallbackQuery, state: FSMContext):
+    chain = callback.data.split(":", 1)[-1].upper()
+    await _start_parameter_prompt(
+        callback,
+        state,
+        "Reply to this message with your desired gas value in SOL for the sell order.\n\nExample: 0.005",
+        BotStates.waiting_for_gas,
+        chain,
+        "settings_sell",
+    )
+
+
+@dp.callback_query(F.data.startswith("price_impact:"))
+async def price_impact_prompt(callback: CallbackQuery, state: FSMContext):
+    chain = callback.data.split(":", 1)[-1].upper()
+    keyboard_type = "settings_sell" if "📌 Sell" in (callback.message.text or "") else "settings_buy"
+    await _start_parameter_prompt(
+        callback,
+        state,
         "Reply to this message with your desired buy price-impact percentage. Greater than 0.1% and less than 100%.\n\n"
         "⚠️ Price-Impact alerts will require you to manually confirm buys with an estimated Price Impact beyond this value. Proceed by changing it with caution.",
-        reply_markup=types.ForceReply(selective=True),
+        BotStates.waiting_for_price_impact,
+        chain,
+        keyboard_type,
     )
-    await state.set_state(BotStates.waiting_for_price_impact)
-    await state.update_data(panel_id=callback.message.message_id, prompt_id=prompt.message_id, chain="SOL", keyboard_type="settings_buy")
-    await callback.answer()
+
+
+@dp.callback_query(F.data == "edit_impact")
+async def edit_impact(callback: CallbackQuery, state: FSMContext):
+    await _start_parameter_prompt(
+        callback,
+        state,
+        "Reply to this message with your desired buy price-impact percentage. Greater than 0.1% and less than 100%.\n\n"
+        "⚠️ Price-Impact alerts will require you to manually confirm buys with an estimated Price Impact beyond this value. Proceed by changing it with caution.",
+        BotStates.waiting_for_price_impact,
+        "SOL",
+        "settings_buy",
+    )
 
 
 @dp.callback_query(F.data.startswith("buy_slippage:"))
 async def buy_slippage_prompt(callback: CallbackQuery, state: FSMContext):
-    parts = callback.data.split(":")
-    chain = parts[-1].upper()
-    prompt = await callback.message.answer(
+    chain = callback.data.split(":", 1)[-1].upper()
+    await _start_parameter_prompt(
+        callback,
+        state,
         "Reply to this message with your desired slippage percentage for the buy order. Minimum is 0.1%. Max is 1000%!",
-        reply_markup=types.ForceReply(selective=True),
+        BotStates.waiting_for_global_slippage,
+        chain,
+        "settings_buy",
     )
-    await state.set_state(BotStates.waiting_for_global_slippage)
-    await state.update_data(panel_id=callback.message.message_id, prompt_id=prompt.message_id, chain=chain, keyboard_type="settings_buy")
-    await callback.answer()
 
 
 @dp.callback_query(F.data.startswith("sell_slippage:"))
 async def sell_slippage_prompt(callback: CallbackQuery, state: FSMContext):
-    parts = callback.data.split(":")
-    chain = parts[-1].upper()
-    prompt = await callback.message.answer(
+    chain = callback.data.split(":", 1)[-1].upper()
+    await _start_parameter_prompt(
+        callback,
+        state,
         "Reply to this message with your desired slippage percentage for the sell order. Minimum is 0.1%. Max is 1000%!",
-        reply_markup=types.ForceReply(selective=True),
+        BotStates.waiting_for_global_slippage,
+        chain,
+        "settings_sell",
     )
-    await state.set_state(BotStates.waiting_for_global_slippage)
-    await state.update_data(panel_id=callback.message.message_id, prompt_id=prompt.message_id, chain=chain, keyboard_type="settings_sell")
-    await callback.answer()
 
 
 @dp.callback_query(F.data == "edit_slippage")
 async def edit_slippage(callback: CallbackQuery, state: FSMContext):
-    prompt = await callback.message.answer(
+    await _start_parameter_prompt(
+        callback,
+        state,
         "Reply to this message with your desired slippage percentage. Minimum is 0.1%. Max is 1000%!",
-        reply_markup=types.ForceReply(selective=True),
+        BotStates.waiting_for_global_slippage,
+        "SOL",
+        "settings_buy",
     )
-    await state.set_state(BotStates.waiting_for_global_slippage)
-    await state.update_data(panel_id=callback.message.message_id, prompt_id=prompt.message_id, chain="SOL", keyboard_type="settings_buy")
-    await callback.answer()
 
 
 @dp.message(BotStates.waiting_for_global_slippage)
