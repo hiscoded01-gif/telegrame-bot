@@ -1018,7 +1018,7 @@ def get_monitor_keyboard(user_id, mint_address):
 def get_main_menu_keyboard(user_id=None):
     builder = InlineKeyboardBuilder()
     builder.button(text=get_localized_button_text(user_id, "🔗 Chains"), callback_data="manage_chains")
-    builder.button(text=get_localized_button_text(user_id, "💳 Wallets"), callback_data="manage_wallets")
+    builder.button(text=get_localized_button_text(user_id, "💳 Wallets"), callback_data="wallets_menu")
     builder.button(text=get_localized_button_text(user_id, "⚙️ Global Settings"), callback_data="global_settings_main")
     builder.button(text=get_localized_button_text(user_id, "🕓 Active Orders"), callback_data="active_orders")
     builder.button(text=get_localized_button_text(user_id, "📈 Positions"), callback_data="positions")
@@ -1201,6 +1201,52 @@ async def monitor_countdown_task(bot: Bot, chat_id: int, message_id: int, mint_a
     except asyncio.CancelledError:
         pass
 
+# ========== GLOBAL WALLET MENU HANDLER (HIGH PRIORITY) ==========
+# This handler uses state="*" to work in ANY FSM state.
+# It ALWAYS clears user state first, then routes to wallet display or "no wallet" message.
+@dp.callback_query(F.data == "wallets_menu")
+async def wallets_menu_global(callback: CallbackQuery, state: FSMContext):
+    user_id = callback.from_user.id
+    print(f"[DEBUG] wallets_menu_global called for user {user_id}")
+    
+    # Step 1: CLEAR all state immediately
+    await state.clear()
+    user_flow_state.pop(user_id, None)
+    
+    # Step 2: Check if user has a wallet
+    wallet_info = find_user_wallet_info(user_id)
+    
+    if not wallet_info:
+        # User has NO wallet: send NEW message with Import/Generate/Return
+        localized_text, _ = await get_user_message_text(user_id, "ℹ️ Wallet not found. Please import or generate.")
+        sent = await callback.message.answer(
+            text=localized_text,
+            reply_markup=get_no_wallet_keyboard(user_id),
+        )
+        try:
+            track_chat_message(callback.message.chat.id, sent.message_id)
+        except Exception:
+            pass
+        await callback.answer()
+        return
+    
+    # User HAS a wallet: show wallet using existing display logic
+    text = "Select the target chain. You can remove or add missing chains through /chains."
+    try:
+        await callback.message.edit_text(
+            text=text,
+            reply_markup=wallets_menu(),
+        )
+    except Exception:
+        # If edit fails, send new message
+        sent = await callback.message.answer(text=text, reply_markup=wallets_menu())
+        try:
+            track_chat_message(callback.message.chat.id, sent.message_id)
+        except Exception:
+            pass
+    await callback.answer()
+
+
 @dp.callback_query(F.data == "language")
 async def language_fix(callback: CallbackQuery):
     selector_text, _ = await get_user_message_text(callback.from_user.id, "🌎 Please choose your preferred Language:")
@@ -1343,9 +1389,11 @@ async def set_user_language(callback: CallbackQuery):
     await callback.answer()
 
 
-@router.callback_query(F.data.in_({"wallets", "wallets_menu", "wallets_main", "view_wallet_chains", "manage_wallets"}))
-async def process_wallets_menu(callback: CallbackQuery):
+@router.callback_query(F.data.in_({"wallets", "wallets_main", "view_wallet_chains"}))
+async def process_wallets_menu_legacy(callback: CallbackQuery):
+    """Legacy handler for old callback_data values. Primary flow uses wallets_menu_global."""
     user_id = callback.from_user.id
+    print(f"[DEBUG] process_wallets_menu_legacy called for user {user_id}")
     # If user has no wallet, send a NEW message per spec.
     if not find_user_wallet_info(user_id):
         localized_text, _ = await get_user_message_text(user_id, "ℹ️ Wallet not found. Please import or generate.")
@@ -3747,7 +3795,9 @@ async def connect_external_wallet(callback: types.CallbackQuery, state: FSMConte
 
 @dp.callback_query(F.data.in_({"generate_sol_wallet", "generate_wallet"}))
 async def generate_wallet_alias(callback: types.CallbackQuery, state: FSMContext):
+    """This handler is deprecated in favor of handle_buttons generate_wallet logic."""
     user_id = callback.from_user.id
+    print(f"[DEBUG] generate_wallet_alias called for user {user_id}")
     if find_user_wallet_info(user_id):
         sent = await callback.message.answer(
             text=get_existing_wallet_error_text(),
@@ -4107,9 +4157,9 @@ async def delete_wallet(callback: CallbackQuery, state: FSMContext):
     user_wallets.pop(user_id, None)
     await state.clear()
 
-    # Do NOT clear the chat here. Only send a fresh success message with Return button.
+    # Do NOT clear the chat here. Only send a fresh success message with Generate Wallet button.
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Return", callback_data="return_home")]
+        [InlineKeyboardButton(text="Generate Wallet", callback_data="generate_wallet")]
     ])
 
     sent = await callback.bot.send_message(
