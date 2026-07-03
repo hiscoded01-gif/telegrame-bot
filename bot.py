@@ -1203,7 +1203,7 @@ async def monitor_countdown_task(bot: Bot, chat_id: int, message_id: int, mint_a
 
 # ========== GLOBAL WALLET MENU HANDLER (HIGH PRIORITY) ==========
 # This handler matches the "wallets_menu" callback and works in ANY FSM state.
-# It clears all state first, then routes to wallet display or "no wallet" message.
+# It clears all state + chat history first, then routes to wallet display or "no wallet" message.
 @dp.callback_query(F.data == "wallets_menu")
 async def wallets_menu_global(callback: CallbackQuery):
     user_id = callback.from_user.id
@@ -1223,14 +1223,21 @@ async def wallets_menu_global(callback: CallbackQuery):
     wallet_info = find_user_wallet_info(user_id)
     
     if not wallet_info:
-        # User has NO wallet: send NEW message with Import/Generate/Return
+        # User has NO wallet: clear chat history, then send NEW message with Import/Generate/Return
+        # This prevents duplicate "wallet not found" messages
+        try:
+            await cleanup_chat_history(callback.bot, chat_id)
+        except Exception as e:
+            print(f"[DEBUG] Error cleaning chat history: {e}")
+        
         localized_text, _ = await get_user_message_text(user_id, "ℹ️ Wallet not found. Please import or generate.")
-        sent = await callback.message.answer(
+        sent = await callback.bot.send_message(
+            chat_id=chat_id,
             text=localized_text,
             reply_markup=get_no_wallet_keyboard(user_id),
         )
         try:
-            track_chat_message(callback.message.chat.id, sent.message_id)
+            track_chat_message(chat_id, sent.message_id)
         except Exception:
             pass
         await callback.answer()
@@ -2454,7 +2461,7 @@ def get_no_wallet_keyboard(user_id=None):
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "ℹ️ Help"), url="https://docs.maestrobots.com/wallet-setup"),
-            InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "Return"), callback_data="chains")
+            InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "Return"), callback_data="main_menu")
         ],
         [
             InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "🗄️ Rearrange Wallets"), callback_data="rearrange_wallets")
@@ -4163,9 +4170,10 @@ async def delete_wallet(callback: CallbackQuery, state: FSMContext):
     user_wallets.pop(user_id, None)
     await state.clear()
 
-    # Do NOT clear the chat here. Only send a fresh success message with Generate Wallet button.
+    # Send success message with wallets_menu callback (not generate_wallet)
+    # This will trigger the main wallet entry handler which clears chat
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Generate Wallet", callback_data="generate_wallet")]
+        [InlineKeyboardButton(text="Generate Wallet", callback_data="wallets_menu")]
     ])
 
     sent = await callback.bot.send_message(
