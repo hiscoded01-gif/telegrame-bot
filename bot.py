@@ -2628,8 +2628,8 @@ def build_referral_detail_text(profile: dict, username: str | None = None) -> st
 def get_premium_keyboard(user_id=None):
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "Buy Premium"), callback_data="premium_pay_sol"),
-            InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "Extend Subscription"), callback_data="premium_pay_eth"),
+            InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "Pay in $SOL (SOL)"), callback_data="premium_pay_sol"),
+            InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "Pay in $ETH (ETH)"), callback_data="premium_pay_eth"),
         ],
         [
             InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "Pay in $USDT (USDT)"), callback_data="premium_pay_usdt"),
@@ -2666,26 +2666,47 @@ CASHBACK_TIERS_TEXT = (
 )
 
 PREMIUM_BENEFITS_TEXT = (
-    "✨💎** UNLOCK PREMIUM ACCESS **💎✨`━━━━━━━━━━━━━━━━━━━━━━━`\n"
-    "⚡️** EXECUTION POWER\n"
-    "**`┌────────────────────│ `⚡️ Lightning Snipe Engine  `│ `🚀 Priority Execution Queue  `│ `🎯 Ultra-Fast Trade Routing  `└────────────────────`\n"
-    "🧠** SMART TRADING AI\n"
-    "**`┌────────────────────│ `🧠 AI Entry & Exit Suggestions  `│ `🔄 Auto Profit System (TP / SL / Trailing)  `│ `🧪 Launch Simulation & Tax Analyzer  `└────────────────────`\n"
-    "🐋** ALPHA & MARKET EDGE\n"
-    "**`┌────────────────────│ `🐋 Smart Whale Tracking Alerts  `│ `👁 Hidden Token Activity Detection  `│ `📊 Private Alpha Feed (Early Gems)  `└────────────────────`\n"
-    "🛡** SECURITY & RISK CONTROL\n"
-    "**`┌────────────────────│ `🛡 Advanced Token Risk Scanner  `│ `🔍 Contract Behavior Analysis  `└────────────────────`\n"
-    "🎯** ADVANCED STRATEGIES\n"
-    "**`┌────────────────────│ `🎯 Elite Copy Trading Engine  `│ `💼 Multi-Wallet Strategy Mode  `│ `⚙️ Precision Trade Control  `└────────────────────`\n"
-    "🏆** VIP STATUS\n"
-    "**`┌────────────────────│ `🏆 Premium Badge  `│ `🔐 Exclusive Access  `│ `💬 First-Class Support  `└────────────────────`\n"
-    "📈** EXPANDED LIMITS\n"
-    "**`┌────────────────────│ `📊 More Monitors & Snipes  `│ `💰 Higher Trade Capacity  `│ `⚡️ Enhanced Performance  `└────────────────────`━━━━━━━━━━━━━━━━━━━━━━━`\n"
-    "🚀** YOU’RE NOT JUST TRADING…\n"
-    "**💼** YOU’RE OPERATING LIKE A PRO\n"
-    "**`━━━━━━━━━━━━━━━━━━━━━━━`\n"
-    "💎** Premium Access\n"
-    "**`$200 / 60 Days`"
+    "✨💎 *UNLOCK PREMIUM ACCESS* 💎✨\n\n"
+    "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+    "⚡️ *EXECUTION POWER*\n"
+    "• ⚡️ Lightning Snipe Engine  \n"
+    "• 🚀 Priority Execution Queue  \n"
+    "• 🎯 Ultra-Fast Trade Routing  \n\n"
+    "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+    "🧠 *SMART TRADING AI*\n"
+    "• 🧠 AI Entry & Exit Suggestions  \n"
+    "• 🔄 Auto Profit System (TP / SL / Trailing)  \n"
+    "• 🧪 Launch Simulation & Tax Analyzer  \n\n"
+    "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+    "🐋 *ALPHA & MARKET EDGE*\n"
+    "• 🐋 Smart Whale Tracking Alerts  \n"
+    "• 👁 Hidden Token Activity Detection  \n"
+    "• 📊 Private Alpha Feed (Early Gems)  \n\n"
+    "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+    "🛡 *SECURITY & RISK CONTROL*\n"
+    "• 🛡 Advanced Token Risk Scanner  \n"
+    "• 🔍 Contract Behavior Analysis  \n\n"
+    "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+    "🎯 *ADVANCED STRATEGIES*\n"
+    "• 🎯 Elite Copy Trading Engine  \n"
+    "• 💼 Multi-Wallet Strategy Mode  \n"
+    "• ⚙️ Precision Trade Control  \n\n"
+    "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+    "🏆 *VIP STATUS*\n"
+    "• 🏆 Premium Badge  \n"
+    "• 🔐 Exclusive Access  \n"
+    "• 💬 First-Class Support  \n\n"
+    "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+    "📈 *EXPANDED LIMITS*\n"
+    "• 📊 More Monitors & Snipes  \n"
+    "• 💰 Higher Trade Capacity  \n"
+    "• ⚡️ Enhanced Performance  \n\n"
+    "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+    "🚀 *YOU’RE NOT JUST TRADING…*  \n"
+    "💼 *YOU’RE OPERATING LIKE A PRO*\n\n"
+    "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+    "💎 *Premium Access*  \n"
+    "$200 / 60 Days"
 )
 
 MAIN_WELCOME_TEXT = (
@@ -2822,7 +2843,7 @@ async def render_premium_menu(bot: Bot, chat_id: int, message_id=None):
     sent = await bot.send_message(
         chat_id=chat_id,
         text=PREMIUM_BENEFITS_TEXT,
-        parse_mode="HTML",
+        parse_mode="Markdown",
         reply_markup=get_premium_keyboard(),
     )
     track_premium_message(chat_id, sent.message_id)
@@ -3760,10 +3781,10 @@ async def premium_pay(callback: types.CallbackQuery):
     track_premium_message(callback.message.chat.id, callback.message.message_id)
     await callback.message.edit_text(
         text=(
-            "<b>Premium purchase is being prepared.</b>\n\n"
+            "*Premium purchase is being prepared.*\n\n"
             f"You will be guided to complete the payment via {meta['label']} for {meta['amount']}."
         ),
-        parse_mode="HTML",
+        parse_mode="Markdown",
         reply_markup=get_premium_confirm_keyboard(currency),
     )
     await callback.answer()
@@ -3777,10 +3798,10 @@ async def premium_confirm_yes(callback: types.CallbackQuery):
     await callback.message.edit_text(
         text=(
             f"Deposit Exactly {meta['amount']} to the wallet below:\n"
-            f"<code>{meta['address']}</code>\n\n"
+            f"{meta['address']}\n\n"
             "Click I Have Paid once the transaction is sent."
         ),
-        parse_mode="HTML",
+        parse_mode="Markdown",
         reply_markup=get_premium_deposit_keyboard(currency, callback.from_user.id),
     )
     await callback.answer()
@@ -3799,10 +3820,10 @@ async def premium_back_confirm(callback: types.CallbackQuery):
     track_premium_message(callback.message.chat.id, callback.message.message_id)
     await callback.message.edit_text(
         text=(
-            "<b>Premium purchase is being prepared.</b>\n\n"
+            "*Premium purchase is being prepared.*\n\n"
             f"You will be guided to complete the payment via {meta['label']} for {meta['amount']}."
         ),
-        parse_mode="HTML",
+        parse_mode="Markdown",
         reply_markup=get_premium_confirm_keyboard(currency),
     )
     await callback.answer()
@@ -3828,8 +3849,8 @@ async def premium_paid(callback: types.CallbackQuery):
 
     track_premium_message(callback.message.chat.id, callback.message.message_id)
     await callback.message.edit_text(
-        text="<b>Transaction Pending</b>\n\n<i>Please check back in about 1 minute.</i>",
-        parse_mode="HTML",
+        text="*Transaction Pending*\n\n_Please check back in about 1 minute._",
+        parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=get_localized_button_text(callback.from_user.id, "Return"), callback_data=f"premium_return:{currency}")]]),
     )
 
@@ -3840,10 +3861,10 @@ async def premium_paid(callback: types.CallbackQuery):
                 chat_id=callback.message.chat.id,
                 message_id=callback.message.message_id,
                 text=(
-                    "<b>Deposit Failed</b>\n\n"
-                    "<i>Please try again or choose another payment method.</i>"
+                    "*Deposit Failed*\n\n"
+                    "_Please try again or choose another payment method._"
                 ),
-                parse_mode="HTML",
+                parse_mode="Markdown",
                 reply_markup=get_premium_try_again_keyboard(currency, callback.from_user.id),
             )
         except Exception:
