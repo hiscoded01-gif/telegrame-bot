@@ -3626,16 +3626,22 @@ async def generate_wallet_alias(callback: types.CallbackQuery, state: FSMContext
         [InlineKeyboardButton(text="BASE", callback_data="choose_chain_base")],
         [InlineKeyboardButton(text="Return", callback_data="wallets")],
     ])
-    chain_selection_msg = await callback.message.answer(
-        text="Select the target chain. You can remove or add missing chains through /chains.",
-        reply_markup=keyboard,
-    )
-    
-    # Track message ID
-    if user_id not in user_messages:
-        user_messages[user_id] = []
-    user_messages[user_id].append(chain_selection_msg.message_id)
-    await state.update_data(tracked_messages=user_messages.get(user_id, []))
+    try:
+        await callback.message.edit_text(
+            text="Select the target chain. You can remove or add missing chains through /chains.",
+            reply_markup=keyboard,
+        )
+    except Exception:
+        # Fallback if message is too old
+        try:
+            await callback.message.delete()
+        except Exception:
+            pass
+        await callback.bot.send_message(
+            chat_id=callback.from_user.id,
+            text="Select the target chain. You can remove or add missing chains through /chains.",
+            reply_markup=keyboard,
+        )
     
     await callback.answer()
 
@@ -4200,10 +4206,22 @@ async def handle_buttons(callback: types.CallbackQuery, state: FSMContext):
             [InlineKeyboardButton(text="BASE", callback_data="view_wallet_base")],
             [InlineKeyboardButton(text="Return", callback_data="main_menu")],
         ])
-        await callback.message.answer(
-            text="Select the chain to view your wallets.",
-            reply_markup=keyboard,
-        )
+        try:
+            await callback.message.edit_text(
+                text="Select the chain to view your wallets.",
+                reply_markup=keyboard,
+            )
+        except Exception:
+            # Fallback if message is too old
+            try:
+                await callback.message.delete()
+            except Exception:
+                pass
+            await callback.bot.send_message(
+                chat_id=callback.from_user.id,
+                text="Select the chain to view your wallets.",
+                reply_markup=keyboard,
+            )
         await callback.answer()
 
     elif data == "rearrange_wallets":
@@ -4236,10 +4254,22 @@ async def handle_buttons(callback: types.CallbackQuery, state: FSMContext):
                 [InlineKeyboardButton(text="Generate Wallet", callback_data=f"choose_chain_{chain.lower()}"), InlineKeyboardButton(text="Import Wallet", callback_data="import_wallet")],
                 [InlineKeyboardButton(text="Return", callback_data="wallets")],
             ])
-            await callback.message.answer(
-                text=f"ℹ️ No {chain} wallet found. Please generate or import one.",
-                reply_markup=keyboard,
-            )
+            try:
+                await callback.message.edit_text(
+                    text=f"ℹ️ No {chain} wallet found. Please generate or import one.",
+                    reply_markup=keyboard,
+                )
+            except Exception:
+                # Fallback if message is too old
+                try:
+                    await callback.message.delete()
+                except Exception:
+                    pass
+                await callback.bot.send_message(
+                    chat_id=callback.from_user.id,
+                    text=f"ℹ️ No {chain} wallet found. Please generate or import one.",
+                    reply_markup=keyboard,
+                )
         else:
             # Display wallet
             wallet_name = wallet_info.get("name", "Wallet")
@@ -4266,11 +4296,24 @@ async def handle_buttons(callback: types.CallbackQuery, state: FSMContext):
                 [InlineKeyboardButton(text="Collect", callback_data="collect_wallet"), InlineKeyboardButton(text="Disperse", callback_data="disperse_wallet")],
             ])
             
-            await callback.message.answer(
-                text=wallet_text,
-                parse_mode="HTML",
-                reply_markup=keyboard,
-            )
+            try:
+                await callback.message.edit_text(
+                    text=wallet_text,
+                    parse_mode="HTML",
+                    reply_markup=keyboard,
+                )
+            except Exception:
+                # Fallback if message is too old
+                try:
+                    await callback.message.delete()
+                except Exception:
+                    pass
+                await callback.bot.send_message(
+                    chat_id=callback.from_user.id,
+                    text=wallet_text,
+                    parse_mode="HTML",
+                    reply_markup=keyboard,
+                )
         
         await callback.answer()
 
@@ -4331,16 +4374,22 @@ async def handle_buttons(callback: types.CallbackQuery, state: FSMContext):
             [InlineKeyboardButton(text="BASE", callback_data="choose_chain_base")],
             [InlineKeyboardButton(text="Return", callback_data="wallets")],
         ])
-        chain_selection_msg = await callback.message.answer(
-            text="Select the target chain. You can remove or add missing chains through /chains.",
-            reply_markup=keyboard,
-        )
-        
-        # Track message ID
-        if user_id not in user_messages:
-            user_messages[user_id] = []
-        user_messages[user_id].append(chain_selection_msg.message_id)
-        await state.update_data(tracked_messages=user_messages.get(user_id, []))
+        try:
+            await callback.message.edit_text(
+                text="Select the target chain. You can remove or add missing chains through /chains.",
+                reply_markup=keyboard,
+            )
+        except Exception:
+            # Fallback if message is too old
+            try:
+                await callback.message.delete()
+            except Exception:
+                pass
+            await callback.bot.send_message(
+                chat_id=callback.from_user.id,
+                text="Select the target chain. You can remove or add missing chains through /chains.",
+                reply_markup=keyboard,
+            )
 
     elif data == "track_wallet":
         user_wallets_data = user_wallets.get(callback.from_user.id, {})
