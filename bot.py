@@ -824,29 +824,64 @@ async def fetch_dexscreener_data(contract_address: str) -> dict:
             "success": False,
         }
 
+    def _coerce_number(value, default=0.0):
+        if value in (None, "", "N/A"):
+            return default
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    def _pick_pair_value(pair: dict, *keys):
+        for key in keys:
+            value = pair.get(key)
+            if value not in (None, ""):
+                return value
+        return None
+
+    def _pick_liquidity(pair: dict):
+        liquidity = pair.get("liquidity") or {}
+        if isinstance(liquidity, dict):
+            usd = liquidity.get("usd")
+            if usd not in (None, ""):
+                return _coerce_number(usd)
+        return _coerce_number(_pick_pair_value(pair, "liquidityUsd", "liquidity_usd"))
+
+    def _pick_volume(pair: dict):
+        volume_data = pair.get("volume") or {}
+        if isinstance(volume_data, dict):
+            for key in ("h24", "24h", "usd24h"):
+                if volume_data.get(key) not in (None, ""):
+                    return _coerce_number(volume_data.get(key))
+        return _coerce_number(_pick_pair_value(pair, "volume24h", "volume_24h", "volumeUsd"))
+
+    def _pick_price_change(pair: dict):
+        price_change_data = pair.get("priceChange") or {}
+        if isinstance(price_change_data, dict):
+            change = price_change_data.get("h24")
+            if change not in (None, ""):
+                return change
+        return _pick_pair_value(pair, "priceChange24h", "priceChange")
+
     url = f"https://api.dexscreener.com/latest/dex/tokens/{contract_address}"
     try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as session:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=8)) as session:
             async with session.get(url) as response:
                 if response.status == 200:
                     data = await response.json()
                     pairs = data.get("pairs") or []
                     if pairs:
-                        primary_pair = max(
-                            pairs,
-                            key=lambda pair: float((pair.get("liquidityUsd") or 0) or 0),
-                            default=None,
-                        )
+                        primary_pair = max(pairs, key=lambda pair: _pick_liquidity(pair), default=None)
                         if primary_pair:
                             base_token = primary_pair.get("baseToken") or {}
                             token_name = base_token.get("name") or "Unknown Token"
                             token_symbol = base_token.get("symbol") or "UNKNOWN"
-                            price_usd = float(primary_pair.get("priceUsd", 0) or 0)
-                            liquidity_usd = float(primary_pair.get("liquidityUsd", 0) or 0)
-                            fdv = float(primary_pair.get("fdv", primary_pair.get("marketCap", 0)) or 0)
-                            volume_24h = float(primary_pair.get("volume24h", primary_pair.get("volume", 0)) or 0)
-                            price_change_24h = primary_pair.get("priceChange24h") or primary_pair.get("priceChange")
-                            dex_id = primary_pair.get("dexId") or primary_pair.get("dexName")
+                            price_usd = _coerce_number(_pick_pair_value(primary_pair, "priceUsd", "price_usd", "price"))
+                            liquidity_usd = _pick_liquidity(primary_pair)
+                            fdv = _coerce_number(_pick_pair_value(primary_pair, "fdv", "marketCap", "market_cap"))
+                            volume_24h = _pick_volume(primary_pair)
+                            price_change_24h = _pick_price_change(primary_pair)
+                            dex_id = _pick_pair_value(primary_pair, "dexId", "dexName")
                             return {
                                 "name": token_name,
                                 "symbol": token_symbol,
