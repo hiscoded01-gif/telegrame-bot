@@ -4135,6 +4135,39 @@ async def return_to_wallet_menu(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
+@dp.callback_query(F.data.startswith("set_default_wallet:") | F.data.startswith("edit_wallet:") | F.data.startswith("toggle_manual:"))
+async def handle_wallet_settings(callback: CallbackQuery):
+    """Handle wallet settings (default, manual toggle, edit)."""
+    
+    if callback.data.startswith("set_default_wallet:"):
+        chain = callback.data.split(":")[1]
+        await callback.answer(f"Setting {chain} as default wallet...", show_alert=False)
+        # TODO: Implement setting default wallet
+        
+    elif callback.data.startswith("edit_wallet:"):
+        chain = callback.data.split(":")[1]
+        await callback.answer(f"Edit {chain} wallet...", show_alert=False)
+        # TODO: Implement wallet editing/renaming
+        
+    elif callback.data.startswith("toggle_manual:"):
+        chain = callback.data.split(":")[1]
+        await callback.answer(f"Toggled manual for {chain} wallet", show_alert=False)
+        # TODO: Implement manual toggle
+
+
+@dp.callback_query(F.data.in_({"collect_wallet", "disperse_wallet"}))
+async def handle_wallet_operations(callback: CallbackQuery):
+    """Handle wallet collection and dispersal operations."""
+    
+    if callback.data == "collect_wallet":
+        await callback.answer("Collect feature coming soon...", show_alert=True)
+        # TODO: Implement collect wallet feature
+        
+    elif callback.data == "disperse_wallet":
+        await callback.answer("Disperse feature coming soon...", show_alert=True)
+        # TODO: Implement disperse wallet feature
+
+
 @dp.callback_query(F.data == "bridge_close")
 async def bridge_close(callback: CallbackQuery):
     try:
@@ -4153,12 +4186,25 @@ async def handle_buttons(callback: types.CallbackQuery, state: FSMContext):
     if data in {"chains", "manage_chains"}:
         await render_chains_menu(callback, callback.from_user.id)
 
-    elif data in {"wallet_no_wallet", "wallets", "manage_wallets", "active_orders", "positions", "auto_snipe"}:
+    elif data in {"wallet_no_wallet", "manage_wallets", "active_orders", "positions", "auto_snipe"}:
         await callback.message.edit_text(
             text=NO_WALLET_TEXT,
             parse_mode="HTML",
             reply_markup=get_no_wallet_keyboard(callback.from_user.id)
         )
+    
+    elif data == "wallets":
+        # Show chain selection for wallet viewing
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="SOL", callback_data="view_wallet_sol"), InlineKeyboardButton(text="ETH", callback_data="view_wallet_eth")],
+            [InlineKeyboardButton(text="BASE", callback_data="view_wallet_base")],
+            [InlineKeyboardButton(text="Return", callback_data="main_menu")],
+        ])
+        await callback.message.answer(
+            text="Select the chain to view your wallets.",
+            reply_markup=keyboard,
+        )
+        await callback.answer()
 
     elif data == "rearrange_wallets":
         await callback.message.edit_text(
@@ -4172,13 +4218,61 @@ async def handle_buttons(callback: types.CallbackQuery, state: FSMContext):
         network_status[chain] = not network_status[chain]
         await callback.message.edit_reply_markup(reply_markup=get_chains_keyboard(callback.from_user.id))
 
-    elif data.startswith("wallet_select_"):
-        chain_type = data.split("_")[2]
-        await callback.message.edit_text(
-            text=NO_WALLET_TEXT,
-            parse_mode="HTML",
-            reply_markup=get_wallet_action_keyboard(chain_type, callback.from_user.id)
-        )
+    elif data.startswith("view_wallet_"):
+        chain = data.split("_")[2].upper()
+        user_id = callback.from_user.id
+        
+        if chain == "BASE":
+            await callback.answer(popup_alert("No BASE wallet", ""), show_alert=True)
+            return
+        
+        # Get user's wallet for this chain
+        user_wallets_data = user_wallets.get(user_id, {})
+        wallet_info = user_wallets_data.get(chain)
+        
+        if not wallet_info:
+            # No wallet for this chain
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="Generate Wallet", callback_data=f"choose_chain_{chain.lower()}"), InlineKeyboardButton(text="Import Wallet", callback_data="import_wallet")],
+                [InlineKeyboardButton(text="Return", callback_data="wallets")],
+            ])
+            await callback.message.answer(
+                text=f"ℹ️ No {chain} wallet found. Please generate or import one.",
+                reply_markup=keyboard,
+            )
+        else:
+            # Display wallet
+            wallet_name = wallet_info.get("name", "Wallet")
+            wallet_address = wallet_info.get("wallet", "")
+            
+            wallet_text = (
+                f"🔗 {chain}\n\n"
+                f"<b>{wallet_name}:</b>\n"
+                f"<code>{wallet_address}</code>\n\n"
+                f"🟢 Default | 🟢 Manual | 💰 0 {chain}\n\n"
+                f"ℹ️ To transfer from a wallet or rename it, click on the wallet name.\n"
+                f"ℹ️ Enable \"Manual\" for the wallets participating in your manual buys. "
+                f"Automated buys will be defaulted to your \"Default\" wallet, but you can further control this through dedicated Signals, Copytrade, and Auto Snipe settings."
+            )
+            
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="ℹ️ Help", url="https://docs.maestrobots.com/wallet-setup"), InlineKeyboardButton(text="Return", callback_data="wallets")],
+                [InlineKeyboardButton(text="🗃 Rearrange Wallets", callback_data="rearrange_wallets")],
+                [InlineKeyboardButton(text=f"Default Wallet | {wallet_name}", callback_data=f"set_default_wallet:{chain}")],
+                [InlineKeyboardButton(text=f"⚙️ {wallet_name}", callback_data=f"edit_wallet:{chain}")],
+                [InlineKeyboardButton(text="🟢 Manual", callback_data=f"toggle_manual:{chain}")],
+                [InlineKeyboardButton(text="❌ Delete", callback_data=f"delete_wallet:{chain}")],
+                [InlineKeyboardButton(text="Import Wallet", callback_data="import_wallet"), InlineKeyboardButton(text="Generate Wallet", callback_data=f"choose_chain_{chain.lower()}")],
+                [InlineKeyboardButton(text="Collect", callback_data="collect_wallet"), InlineKeyboardButton(text="Disperse", callback_data="disperse_wallet")],
+            ])
+            
+            await callback.message.answer(
+                text=wallet_text,
+                parse_mode="HTML",
+                reply_markup=keyboard,
+            )
+        
+        await callback.answer()
 
     elif data.startswith("generate_select_"):
         target_chain = data.split("_")[2].upper()
@@ -4219,7 +4313,7 @@ async def handle_buttons(callback: types.CallbackQuery, state: FSMContext):
             )
             await state.set_state(WalletSetupState.waiting_for_name)
 
-    elif data == "back_to_main":
+    elif data == "main_menu":
         localized_text, use_html = await get_user_message_text(callback.from_user.id, MAIN_WELCOME_TEXT, html_supported=True)
         await callback.message.edit_text(
             text=localized_text,
@@ -4227,6 +4321,7 @@ async def handle_buttons(callback: types.CallbackQuery, state: FSMContext):
             reply_markup=get_main_keyboard(callback.from_user.id),
             disable_web_page_preview=True
         )
+        await callback.answer()
 
     elif data == "generate_wallet":
         # Always show chain selection, never block globally
