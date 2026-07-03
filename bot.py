@@ -791,10 +791,19 @@ async def get_language_selector_keyboard(user_id: int):
 
 
 # 1. Regex to isolate a clean Solana contract address from incoming messages
+ETH_BSC_ADDRESS_REGEX = r"0x[a-fA-F0-9]{40}"
 SOLANA_ADDRESS_REGEX = r"[1-9A-HJ-NP-Za-km-z]{32,44}"
+CONTRACT_ADDRESS_REGEX = rf"(?:{ETH_BSC_ADDRESS_REGEX}|{SOLANA_ADDRESS_REGEX})"
 
 # 2. Your newly activated Solscan Pro API Token
 SOLSCAN_API_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJjcmVhdGVkQXQiOjE3ODI4NDg0NTMyMDMsImVtYWlsIjoiY29kZWRmeDAxQGdtYWlsLmNvbSIsImFjdGlvbiI6InRva2VuLWFwaSIsImFwaVZlcnNpb24iOiJ2MiIsImlhdCI6MTc4Mjg0ODQ1M30.nvjtdTqWvultWDQjIgtBPHHXUfHfKpugv3qlZSJFgwc"
+
+
+def extract_contract_address(text: str | None) -> str | None:
+    if not text:
+        return None
+    match = re.search(CONTRACT_ADDRESS_REGEX, text)
+    return match.group(0) if match else None
 
 
 async def fetch_dexscreener_data(contract_address: str) -> dict:
@@ -804,7 +813,16 @@ async def fetch_dexscreener_data(contract_address: str) -> dict:
     """
     contract_address = (contract_address or "").strip()
     if not contract_address:
-        return {"name": "Unknown Token", "symbol": "UNKNOWN", "price": "$0", "market_cap": 0, "mc": "$0", "success": False}
+        return {
+            "name": "Unknown Token",
+            "symbol": "UNKNOWN",
+            "price": "$0",
+            "market_cap": 0,
+            "mc": "$0",
+            "liquidity_usd": 0,
+            "liquidity": "$0",
+            "success": False,
+        }
 
     url = f"https://api.dexscreener.com/latest/dex/tokens/{contract_address}"
     try:
@@ -814,24 +832,49 @@ async def fetch_dexscreener_data(contract_address: str) -> dict:
                     data = await response.json()
                     pairs = data.get("pairs") or []
                     if pairs:
-                        primary_pair = pairs[0]
-                        base_token = primary_pair.get("baseToken") or {}
-                        token_name = base_token.get("name", "Unknown Token")
-                        token_symbol = base_token.get("symbol", "UNKNOWN")
-                        price_usd = float(primary_pair.get("priceUsd", 0) or 0)
-                        fdv = float(primary_pair.get("fdv", 0) or 0)
-                        return {
-                            "name": token_name,
-                            "symbol": token_symbol,
-                            "price": f"${price_usd:,.4f}" if price_usd else "$0",
-                            "market_cap": fdv,
-                            "mc": f"${fdv:,.0f}" if fdv else "$0",
-                            "success": True,
-                        }
+                        primary_pair = max(
+                            pairs,
+                            key=lambda pair: float((pair.get("liquidityUsd") or 0) or 0),
+                            default=None,
+                        )
+                        if primary_pair:
+                            base_token = primary_pair.get("baseToken") or {}
+                            token_name = base_token.get("name") or "Unknown Token"
+                            token_symbol = base_token.get("symbol") or "UNKNOWN"
+                            price_usd = float(primary_pair.get("priceUsd", 0) or 0)
+                            liquidity_usd = float(primary_pair.get("liquidityUsd", 0) or 0)
+                            fdv = float(primary_pair.get("fdv", primary_pair.get("marketCap", 0)) or 0)
+                            volume_24h = float(primary_pair.get("volume24h", primary_pair.get("volume", 0)) or 0)
+                            price_change_24h = primary_pair.get("priceChange24h") or primary_pair.get("priceChange")
+                            dex_id = primary_pair.get("dexId") or primary_pair.get("dexName")
+                            return {
+                                "name": token_name,
+                                "symbol": token_symbol,
+                                "price": f"${price_usd:,.4f}" if price_usd else "$0",
+                                "market_cap": fdv,
+                                "mc": f"${fdv:,.0f}" if fdv else "$0",
+                                "liquidity_usd": liquidity_usd,
+                                "liquidity": f"${liquidity_usd:,.0f}" if liquidity_usd else "$0",
+                                "volume_24h": volume_24h,
+                                "volume": f"${volume_24h:,.0f}" if volume_24h else "$0",
+                                "price_change_24h": price_change_24h,
+                                "dex_id": dex_id,
+                                "dex_name": dex_id,
+                                "success": True,
+                            }
     except Exception as e:
         print(f"Dexscreener connection timeout or parsing error: {e}")
 
-    return {"name": "Unknown Token", "symbol": "UNKNOWN", "price": "$0", "market_cap": 0, "mc": "$0", "success": False}
+    return {
+        "name": "Unknown Token",
+        "symbol": "UNKNOWN",
+        "price": "$0",
+        "market_cap": 0,
+        "mc": "$0",
+        "liquidity_usd": 0,
+        "liquidity": "$0",
+        "success": False,
+    }
 
 
 def _coerce_first(data: dict, *keys):
@@ -1195,21 +1238,21 @@ def format_monitor_text(mint_address, token_data=None, remaining_seconds=2160):
             if price_text:
                 price_text = f"{float(price_text):.4f}"
             else:
-                price_text = "0.0000"
+                price_text = "N/A"
         else:
-            price_text = f"{float(price_raw or 0.0):.4f}"
+            price_text = f"{float(price_raw or 0.0):.4f}" if price_raw not in (None, "", 0) else "N/A"
     except Exception:
-        price_text = "0.0000"
+        price_text = "N/A"
 
     try:
         market_cap_raw = token_data.get("market_cap", token_data.get("mc", 0)) if token_data else 0
         if isinstance(market_cap_raw, str):
             market_cap_text = market_cap_raw.replace("$", "")
-            market_cap_text = f"{float(market_cap_text or 0):,.0f}" if market_cap_text else "0"
+            market_cap_text = f"{float(market_cap_text or 0):,.0f}" if market_cap_text else "N/A"
         else:
-            market_cap_text = f"{float(market_cap_raw or 0):,.0f}"
+            market_cap_text = f"{float(market_cap_raw or 0):,.0f}" if market_cap_raw not in (None, "", 0) else "N/A"
     except Exception:
-        market_cap_text = "0"
+        market_cap_text = "N/A"
 
     return (
         f"🪙 {token_label} ⏱️ {timer_str} <a href='{BOT_LINK}'>🌟 Referral</a>\n\n"
@@ -3311,12 +3354,13 @@ async def check_for_contract_addresses(message: types.Message, state: FSMContext
     if message.text is None:
         return
 
-    match = re.search(SOLANA_ADDRESS_REGEX, message.text)
-    if not match:
+    mint_address = extract_contract_address(message.text)
+    if not mint_address:
         return
 
-    mint_address = match.group(0)
+    print("Contract detected:", mint_address)
     token_data = await fetch_dexscreener_data(mint_address)
+    print("Dex data:", token_data)
     monitor_text = format_monitor_text(mint_address, token_data, 2160)
     sent_monitor = await message.answer(
         text=monitor_text,
@@ -3336,12 +3380,11 @@ async def check_for_contract_addresses(message: types.Message, state: FSMContext
 
 @dp.callback_query(F.data == "track")
 async def handle_track_click(callback: types.CallbackQuery):
-    match = re.search(SOLANA_ADDRESS_REGEX, callback.message.text or callback.message.caption or "")
-    if not match:
+    mint_address = extract_contract_address(callback.message.text or callback.message.caption or "")
+    if not mint_address:
         await callback.answer(popup_alert("Expired!", "Start a new lookup.", "/start"), show_alert=True)
         return
 
-    mint_address = match.group(0)
     token_data = await fetch_dexscreener_data(mint_address)
     text = format_monitor_text(mint_address, token_data, 2160)
 
@@ -3424,8 +3467,7 @@ async def _prompt_config_value(callback: types.CallbackQuery, state: FSMContext,
 
 @dp.callback_query(F.data == "slippage")
 async def prompt_slippage_from_trade(callback: types.CallbackQuery, state: FSMContext):
-    mint_address = re.search(SOLANA_ADDRESS_REGEX, callback.message.text or callback.message.caption or "")
-    mint_address = mint_address.group(0) if mint_address else ""
+    mint_address = extract_contract_address(callback.message.text or callback.message.caption or "") or ""
 
     await _prompt_config_value(
         callback,
@@ -3443,8 +3485,7 @@ async def prompt_slippage(callback: types.CallbackQuery, state: FSMContext):
     data = callback.data or ""
     mint_address = data.split(":", 1)[1] if ":" in data else ""
     if not mint_address:
-        mint_address_match = re.search(SOLANA_ADDRESS_REGEX, callback.message.text or callback.message.caption or "")
-        mint_address = mint_address_match.group(0) if mint_address_match else ""
+        mint_address = extract_contract_address(callback.message.text or callback.message.caption or "") or ""
 
     await _prompt_config_value(
         callback,
@@ -3521,8 +3562,7 @@ async def process_slippage_input(message: types.Message, state: FSMContext):
 
 @dp.callback_query(F.data == "gas")
 async def prompt_gas_from_trade(callback: types.CallbackQuery, state: FSMContext):
-    mint_address = re.search(SOLANA_ADDRESS_REGEX, callback.message.text or callback.message.caption or "")
-    mint_address = mint_address.group(0) if mint_address else ""
+    mint_address = extract_contract_address(callback.message.text or callback.message.caption or "") or ""
 
     await _prompt_config_value(
         callback,
@@ -3541,8 +3581,7 @@ async def prompt_gas(callback: types.CallbackQuery, state: FSMContext):
     data = callback.data or ""
     mint_address = data.split(":", 1)[1] if ":" in data else ""
     if not mint_address:
-        mint_address_match = re.search(SOLANA_ADDRESS_REGEX, callback.message.text or callback.message.caption or "")
-        mint_address = mint_address_match.group(0) if mint_address_match else ""
+        mint_address = extract_contract_address(callback.message.text or callback.message.caption or "") or ""
 
     await _prompt_config_value(
         callback,
