@@ -1389,12 +1389,13 @@ async def handle_user_flow_name_input(message: types.Message):
     except Exception:
         pass
 
-    # If a wallet already exists, inform user and clear flow
-    if find_user_wallet_info(user_id):
+    # Only block if the user already has a wallet on the selected chain
+    chain = "SOL" if state == "awaiting_wallet_name_SOL" else "ETH"
+    if has_wallet_on_chain(user_id, chain):
         sent = await message.answer(
-            text=get_existing_wallet_error_text(),
+            text=get_existing_wallet_error_text(chain),
             parse_mode="HTML",
-            reply_markup=get_existing_wallet_error_markup(),
+            reply_markup=get_existing_wallet_error_markup(chain),
         )
         try:
             track_chat_message(message.chat.id, sent.message_id)
@@ -3316,11 +3317,10 @@ async def process_wallet_name(message: types.Message, state: FSMContext):
         await state.clear()
         return
 
-    if find_user_wallet_info(user_id):
-        # Get chain from state to provide chain-specific error
-        user_data = await state.get_data()
-        chain = (user_data.get("current_chain") or user_data.get("chosen_chain") or "SOL").upper()
-        
+    user_data = await state.get_data()
+    chain = (user_data.get("current_chain") or user_data.get("chosen_chain") or "SOL").upper()
+
+    if has_wallet_on_chain(user_id, chain):
         sent = await message.answer(
             text=get_existing_wallet_error_text(chain),
             parse_mode="HTML",
@@ -4436,24 +4436,26 @@ async def handle_buttons(callback: types.CallbackQuery, state: FSMContext):
     elif data.startswith("generate_select_"):
         target_chain = data.split("_")[2].upper()
         user_id = callback.from_user.id
-        existing_wallet = find_user_wallet_info(user_id)
 
-        if existing_wallet:
-            sent = await callback.message.answer(
-                text=get_existing_wallet_error_text(),
-                parse_mode="HTML",
-                reply_markup=get_existing_wallet_error_markup(),
-            )
-            track_chat_message(callback.message.chat.id, sent.message_id)
-        elif target_chain == "BASE":
+        if target_chain == "BASE":
             await callback.answer(text="⚠️ Not Available Base Wallet At The Moment", show_alert=True)
+        elif has_wallet_on_chain(user_id, target_chain):
+            sent = await callback.message.answer(
+                text=get_existing_wallet_error_text(target_chain),
+                parse_mode="HTML",
+                reply_markup=get_existing_wallet_error_markup(target_chain),
+            )
+            try:
+                track_chat_message(callback.message.chat.id, sent.message_id)
+            except Exception:
+                pass
         elif not get_next_wallet(target_chain):
             await callback.message.edit_text(
                 text="❌ Failed to generate. Too many users are currently using the bot. Please try again shortly.",
                 reply_markup=get_generation_error_keyboard()
             )
         else:
-            # Use the new per-user flow: ask for a name with a forced reply and record simple state
+            # Use the new per-chain flow: ask for a name with a forced reply and record simple state
             user_flow_state[user_id] = f"awaiting_wallet_name_{target_chain}"
             sent = await callback.message.answer(
                 text="What would you like to name this wallet? 8 letters max, only numbers and letters.",
