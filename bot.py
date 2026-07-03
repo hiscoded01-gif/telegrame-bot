@@ -117,6 +117,40 @@ LANGUAGE_OPTIONS = {
 
 load_language_prefs()
 
+
+async def edit_or_send_message(bot: Bot, chat_id: int, message_id: int | None, *, text: str, parse_mode: str | None = None, reply_markup=None, disable_web_page_preview: bool = False):
+    """Try to edit an existing message; if it fails, delete the old and send a new one.
+
+    This helper reduces message stacking by reusing panels when possible.
+    """
+    try:
+        if message_id is not None:
+            await bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=message_id,
+                text=text,
+                parse_mode=parse_mode,
+                reply_markup=reply_markup,
+                disable_web_page_preview=disable_web_page_preview,
+            )
+            return
+    except Exception:
+        # best-effort: try deleting the stale message and fall back to send
+        try:
+            if message_id is not None:
+                await bot.delete_message(chat_id=chat_id, message_id=message_id)
+        except Exception:
+            pass
+
+    # final fallback: send a fresh message
+    return await bot.send_message(
+        chat_id=chat_id,
+        text=text,
+        parse_mode=parse_mode,
+        reply_markup=reply_markup,
+        disable_web_page_preview=disable_web_page_preview,
+    )
+
 BUTTON_LABEL_TRANSLATIONS = {
     "en": {
         "🔗 Chains": "🔗 Chains",
@@ -1275,7 +1309,14 @@ async def sol_wallet(callback: CallbackQuery):
         "Import Wallet     Generate Wallet\n"
         "Collect           Disperse"
     )
-    await callback.message.edit_text(text, reply_markup=wallet_action_buttons("SOL"))
+    try:
+        await callback.message.edit_text(text, reply_markup=wallet_action_buttons("SOL"))
+    except Exception:
+        await edit_or_send_message(callback.bot, callback.from_user.id, None, text=text, reply_markup=wallet_action_buttons("SOL"))
+    try:
+        await callback.answer()
+    except Exception:
+        pass
 
 
 @router.callback_query(F.data == "remove_wallet")
@@ -1300,7 +1341,14 @@ async def eth_wallet(callback: CallbackQuery):
         "Import Wallet     Generate Wallet\n"
         "Collect           Disperse"
     )
-    await callback.message.edit_text(text, reply_markup=wallet_action_buttons("ETH"))
+    try:
+        await callback.message.edit_text(text, reply_markup=wallet_action_buttons("ETH"))
+    except Exception:
+        await edit_or_send_message(callback.bot, callback.from_user.id, None, text=text, reply_markup=wallet_action_buttons("ETH"))
+    try:
+        await callback.answer()
+    except Exception:
+        pass
 
 
 @router.callback_query(F.data == "wallet_base")
@@ -4713,6 +4761,12 @@ async def handle_buttons(callback: types.CallbackQuery, state: FSMContext):
                 "🔗 More links:\nhttps://t.me/MaestroBotsHub\nhttps://t.me/MaestroSniperUpdates\nhttps://x.com/MaestroBots\nhttps://docs.maestrobots.com/"
             )
         await callback.answer()
+
+    # Ensure we acknowledge the callback query (best-effort).
+    try:
+        await callback.answer()
+    except Exception:
+        pass
 
 dp.include_router(router)
 
