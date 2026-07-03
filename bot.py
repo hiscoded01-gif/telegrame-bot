@@ -8,7 +8,7 @@ from html import escape
 import aiohttp
 from aiohttp import web
 from aiogram import Bot, Dispatcher, F, Router, types
-from aiogram.filters import Command, StateFilter
+from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import BotCommand, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
@@ -86,8 +86,6 @@ dp = Dispatcher()
 router = Router()
 bridge_state = {}
 
-# Simple per-user state mapping for the wallet setup flow (used for chain-specific naming)
-user_flow_state: dict[int, str] = {}
 CHAIN_IDS = {
     "BSC": 56,
     "SOL": 100000001,
@@ -1018,7 +1016,7 @@ def get_monitor_keyboard(user_id, mint_address):
 def get_main_menu_keyboard(user_id=None):
     builder = InlineKeyboardBuilder()
     builder.button(text=get_localized_button_text(user_id, "🔗 Chains"), callback_data="manage_chains")
-    builder.button(text=get_localized_button_text(user_id, "💳 Wallets"), callback_data="wallets_menu")
+    builder.button(text=get_localized_button_text(user_id, "💳 Wallets"), callback_data="manage_wallets")
     builder.button(text=get_localized_button_text(user_id, "⚙️ Global Settings"), callback_data="global_settings_main")
     builder.button(text=get_localized_button_text(user_id, "🕓 Active Orders"), callback_data="active_orders")
     builder.button(text=get_localized_button_text(user_id, "📈 Positions"), callback_data="positions")
@@ -1076,9 +1074,17 @@ def wallets_menu():
 def wallet_action_buttons(chain_type: str = "SOL"):
     callback_prefix = f"generate_select_{chain_type.lower()}"
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="ℹ️ Help ↗️", callback_data="wallet_help"), InlineKeyboardButton(text="Return", callback_data="wallets_menu")],
+        [InlineKeyboardButton(text="ℹ️ Help", callback_data="wallet_help")],
+        [InlineKeyboardButton(text="Return", callback_data="wallets_menu")],
         [InlineKeyboardButton(text="🗄️ Rearrange Wallets", callback_data="rearrange_wallets")],
-        [InlineKeyboardButton(text="Import Wallet", callback_data="import_wallet"), InlineKeyboardButton(text="Generate Wallet", callback_data=callback_prefix)],
+        [
+            InlineKeyboardButton(text="Import Wallet", callback_data="import_wallet"),
+            InlineKeyboardButton(text="Generate Wallet", callback_data=callback_prefix),
+        ],
+        [
+            InlineKeyboardButton(text="Collect", callback_data="collect"),
+            InlineKeyboardButton(text="Disperse", callback_data="disperse"),
+        ],
     ])
 
 
@@ -1201,99 +1207,6 @@ async def monitor_countdown_task(bot: Bot, chat_id: int, message_id: int, mint_a
     except asyncio.CancelledError:
         pass
 
-# ========== GLOBAL WALLET MENU HANDLER (HIGH PRIORITY) ==========
-# This handler matches the "wallets_menu" callback and works in ANY FSM state.
-# It clears all state + chat history first, then routes to wallet display or "no wallet" message.
-@dp.callback_query(F.data == "wallets_menu")
-async def wallets_menu_global(callback: CallbackQuery):
-    user_id = callback.from_user.id
-    chat_id = callback.message.chat.id
-    print(f"[DEBUG] wallets_menu_global called for user {user_id}")
-    
-    # Step 1: Get FSM context manually and CLEAR all state
-    try:
-        state = dp.fsm.get_context(callback.bot, chat_id, user_id)
-        await state.clear()
-    except Exception as e:
-        print(f"[DEBUG] Error clearing FSM state: {e}")
-    
-    user_flow_state.pop(user_id, None)
-    
-    # Step 2: Check which wallets user has
-    sol_wallet = find_user_wallet_by_chain(user_id, "SOL")
-    eth_wallet = find_user_wallet_by_chain(user_id, "ETH")
-    
-    if not sol_wallet and not eth_wallet:
-        # User has NO wallet: clear chat history, then send NEW message with Import/Generate/Return
-        # This prevents duplicate "wallet not found" messages
-        try:
-            await cleanup_chat_history(callback.bot, chat_id)
-        except Exception as e:
-            print(f"[DEBUG] Error cleaning chat history: {e}")
-        
-        localized_text, _ = await get_user_message_text(user_id, "ℹ️ Wallet not found. Please import or generate.")
-        sent = await callback.bot.send_message(
-            chat_id=chat_id,
-            text=localized_text,
-            reply_markup=get_no_wallet_keyboard(user_id),
-        )
-        try:
-            track_chat_message(chat_id, sent.message_id)
-        except Exception:
-            pass
-        await callback.answer()
-        return
-    
-    # User HAS wallets: show them
-    if sol_wallet and eth_wallet:
-        # Both wallets exist
-        text = "<b>Your Wallets:</b>\n\n"
-        text += f"<b>SOL Wallet:</b>\n"
-        text += f"Name: {sol_wallet.get('name', 'N/A')}\n"
-        text += f"Address: <code>{sol_wallet.get('wallet', 'N/A')}</code>\n\n"
-        text += f"<b>ETH Wallet:</b>\n"
-        text += f"Name: {eth_wallet.get('name', 'N/A')}\n"
-        text += f"Address: <code>{eth_wallet.get('wallet', 'N/A')}</code>\n\n"
-        text += "Select a chain to manage or generate another:"
-        markup = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="SOL", callback_data="wallet_sol"), InlineKeyboardButton(text="ETH", callback_data="wallet_eth")],
-            [InlineKeyboardButton(text="Return", callback_data="main_menu")],
-        ])
-    elif sol_wallet:
-        # Only SOL wallet exists
-        text = "<b>SOL Wallet:</b>\n"
-        text += f"Name: {sol_wallet.get('name', 'N/A')}\n"
-        text += f"Address: <code>{sol_wallet.get('wallet', 'N/A')}</code>\n"
-        text += f"PK: <code>{sol_wallet.get('pk', 'N/A')}</code>"
-        markup = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="Delete Wallet", callback_data="delete_wallet:SOL")],
-            [InlineKeyboardButton(text="Generate ETH", callback_data="choose_chain_eth")],
-            [InlineKeyboardButton(text="Return", callback_data="main_menu")],
-        ])
-    else:
-        # Only ETH wallet exists
-        text = "<b>ETH Wallet:</b>\n"
-        text += f"Name: {eth_wallet.get('name', 'N/A')}\n"
-        text += f"Address: <code>{eth_wallet.get('wallet', 'N/A')}</code>\n"
-        text += f"PK: <code>{eth_wallet.get('pk', 'N/A')}</code>"
-        markup = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="Delete Wallet", callback_data="delete_wallet:ETH")],
-            [InlineKeyboardButton(text="Generate SOL", callback_data="choose_chain_sol")],
-            [InlineKeyboardButton(text="Return", callback_data="main_menu")],
-        ])
-    
-    try:
-        await callback.message.edit_text(text=text, reply_markup=markup, parse_mode="HTML")
-    except Exception:
-        # If edit fails, send new message
-        sent = await callback.message.answer(text=text, reply_markup=markup, parse_mode="HTML")
-        try:
-            track_chat_message(chat_id, sent.message_id)
-        except Exception:
-            pass
-    await callback.answer()
-
-
 @dp.callback_query(F.data == "language")
 async def language_fix(callback: CallbackQuery):
     selector_text, _ = await get_user_message_text(callback.from_user.id, "🌎 Please choose your preferred Language:")
@@ -1302,165 +1215,6 @@ async def language_fix(callback: CallbackQuery):
         reply_markup=await get_language_selector_keyboard(callback.from_user.id),
     )
     await callback.answer()
-
-
-@dp.callback_query(F.data == "choose_chain_sol")
-async def choose_chain_sol(callback: CallbackQuery):
-    user_id = callback.from_user.id
-    
-    # Check if user already has SOL wallet
-    if has_wallet_on_chain(user_id, "SOL"):
-        sent = await callback.message.answer(
-            text=get_existing_wallet_error_text("SOL"),
-            parse_mode="HTML",
-            reply_markup=get_existing_wallet_error_markup("SOL"),
-        )
-        try:
-            track_chat_message(callback.message.chat.id, sent.message_id)
-        except Exception:
-            pass
-        await callback.answer()
-        return
-    
-    # Set simple flow state and prompt the user with a forced reply for the wallet name
-    user_flow_state[user_id] = "awaiting_wallet_name_SOL"
-    sent = await callback.message.answer(
-        text="What would you like to name this wallet?\n8 letters max, only numbers and letters.",
-        reply_markup=types.ForceReply(selective=False),
-    )
-    try:
-        track_chat_message(callback.message.chat.id, sent.message_id)
-    except Exception:
-        pass
-    await callback.answer()
-
-
-@dp.callback_query(F.data == "choose_chain_eth")
-async def choose_chain_eth(callback: CallbackQuery):
-    user_id = callback.from_user.id
-    
-    # Check if user already has ETH wallet
-    if has_wallet_on_chain(user_id, "ETH"):
-        sent = await callback.message.answer(
-            text=get_existing_wallet_error_text("ETH"),
-            parse_mode="HTML",
-            reply_markup=get_existing_wallet_error_markup("ETH"),
-        )
-        try:
-            track_chat_message(callback.message.chat.id, sent.message_id)
-        except Exception:
-            pass
-        await callback.answer()
-        return
-    
-    user_flow_state[user_id] = "awaiting_wallet_name_ETH"
-    sent = await callback.message.answer(
-        text="What would you like to name this wallet?\n8 letters max, only numbers and letters.",
-        reply_markup=types.ForceReply(selective=False),
-    )
-    try:
-        track_chat_message(callback.message.chat.id, sent.message_id)
-    except Exception:
-        pass
-    await callback.answer()
-
-
-@dp.callback_query(F.data == "choose_chain_base")
-async def choose_chain_base(callback: CallbackQuery):
-    # BASE not available — show a popup alert and do not change any state
-    await callback.answer(text="⚠️ Not Available Base Wallet At The Moment", show_alert=True)
-
-
-@dp.message(lambda m: getattr(m.from_user, 'id', None) in user_flow_state)
-async def handle_user_flow_name_input(message: types.Message):
-    # Only handle if the user is currently in our simple per-user flow
-    try:
-        user_id = int(message.from_user.id)
-    except Exception:
-        return
-
-    state = user_flow_state.get(user_id)
-    if not state:
-        return
-
-    # Track the user's reply for later cleanup
-    try:
-        track_chat_message(message.chat.id, message.message_id)
-    except Exception:
-        pass
-
-    # Only block if the user already has a wallet on the selected chain
-    chain = "SOL" if state == "awaiting_wallet_name_SOL" else "ETH"
-    if has_wallet_on_chain(user_id, chain):
-        sent = await message.answer(
-            text=get_existing_wallet_error_text(chain),
-            parse_mode="HTML",
-            reply_markup=get_existing_wallet_error_markup(chain),
-        )
-        try:
-            track_chat_message(message.chat.id, sent.message_id)
-        except Exception:
-            pass
-        user_flow_state.pop(user_id, None)
-        return
-
-    wallet_name = (message.text or "").strip()
-    # Validation: max 8 characters, only letters and numbers
-    if not wallet_name or len(wallet_name) > 8 or not wallet_name.isalnum():
-        await message.answer(text="❌ Invalid name. Use max 8 letters/numbers only.")
-        return
-
-    # Prevent duplicate wallet name
-    if wallet_name.lower() in (name.lower() for name in used_wallet_names):
-        await message.answer(text="❌ Wallet name already taken. Please choose a different name.")
-        return
-
-    chain = "SOL" if state == "awaiting_wallet_name_SOL" else "ETH"
-    wallet_entry = get_next_wallet(chain)
-    if not wallet_entry:
-        await message.answer(
-            text="❌ Failed to generate. Too many users are currently using the bot. Please try again shortly.",
-            reply_markup=get_generation_error_keyboard(),
-        )
-        user_flow_state.pop(user_id, None)
-        return
-
-    # Assign wallet
-    used_wallet_names.add(wallet_name)
-    mark_wallet_as_assigned(wallet_entry, user_id)
-    
-    # Store in multi-chain structure
-    if user_id not in user_wallets:
-        user_wallets[user_id] = {}
-    
-    chain_upper = chain.upper()
-    user_wallets[user_id][chain_upper] = {
-        "chain": chain,
-        "wallet": wallet_entry["address"],
-        "pk": wallet_entry["pk"],
-        "name": wallet_name,
-        "username": message.from_user.username or "N/A",
-    }
-
-    # Build the same response text used elsewhere to avoid changing format
-    response_text = (
-        "<b>✅ Generated new wallet:</b>\n\n"
-        f"Chain: {chain}\n"
-        f"Address: <code>{wallet_entry['address']}</code>\n"
-        f"PK: <code>{wallet_entry['pk']}</code>\n\n"
-        "<i>⚠️ Make sure to save this private key somewhere safe. Do NOT copy-paste it anywhere. "
-        "You can also import it to your Phantom / Trust Wallet. After you finish saving / importing the wallet credentials, "
-        "delete this message. The bot will not display this information again.</i>"
-    )
-
-    sent = await message.answer(text=response_text, parse_mode="HTML")
-    try:
-        track_chat_message(message.chat.id, sent.message_id)
-    except Exception:
-        pass
-
-    # Clear flow state
-    user_flow_state.pop(user_id, None)
 
 
 @dp.callback_query(F.data.startswith("set_language:"))
@@ -1473,65 +1227,55 @@ async def set_user_language(callback: CallbackQuery):
     await callback.answer()
 
 
-@router.callback_query(F.data.in_({"wallets", "wallets_main", "view_wallet_chains"}))
-async def process_wallets_menu_legacy(callback: CallbackQuery):
-    """Legacy handler for old callback_data values. Primary flow uses wallets_menu_global."""
-    user_id = callback.from_user.id
-    print(f"[DEBUG] process_wallets_menu_legacy called for user {user_id}")
-    # If user has no wallet, send a NEW message per spec.
-    if not find_user_wallet_info(user_id):
-        localized_text, _ = await get_user_message_text(user_id, "ℹ️ Wallet not found. Please import or generate.")
-        sent = await callback.message.answer(
-            text=localized_text,
-            reply_markup=get_no_wallet_keyboard(user_id),
-        )
-        try:
-            track_chat_message(callback.message.chat.id, sent.message_id)
-        except Exception:
-            pass
-        await callback.answer()
-        return
-
-    # User already has a wallet — keep existing behavior (wallet display logic)
-    text = "Select the target chain. You can remove or add missing chains through /chains."
-    await callback.message.edit_text(
-        text=text,
-        reply_markup=wallets_menu(),
+@router.callback_query(F.data.in_({"wallets", "wallets_menu", "wallets_main"}))
+async def process_wallets_menu(callback: CallbackQuery):
+    text = (
+        "<b>PSyTjbVGn1ZC</b>\n"
+        "🟢 Default | 🟢 Manual | 💰 0 SOL\n\n"
+        "ℹ️ <i>To transfer from a wallet or rename it, click on the wallet name.</i>\n"
+        "ℹ️ <i>Enable \"Manual\" for the wallets participating in your manual buys. "
+        "Automated buys will be defaulted to your \"Default\" wallet, but you can further "
+        "control this through dedicated Signals, Copytrade, and Auto Snipe settings.</i>"
     )
+
+    builder = InlineKeyboardBuilder()
+
+    builder.button(text="ℹ️ Help ↗️", callback_data="wallet_help")
+    builder.button(text="Return", callback_data="main_menu")
+
+    builder.button(text="🗄️ Rearrange Wallets", callback_data="rearrange_wallets")
+
+    builder.button(text="Default Wallet | 💳 Sami", callback_data="status_sami")
+
+    builder.button(text="⚙️ Sami", callback_data="config_sami")
+    builder.button(text="🟢 Manual", callback_data="toggle_manual_sami")
+    builder.button(text="❌", callback_data="delete_wallet_sami")
+
+    builder.button(text="Import Wallet", callback_data="connect_external_sol")
+    builder.button(text="Generate Wallet", callback_data="generate_sol_wallet")
+
+    builder.button(text="Collect", callback_data="collect_funds")
+    builder.button(text="Disperse", callback_data="disperse_funds")
+
+    builder.adjust(2, 1, 1, 3, 2, 2)
+
+    try:
+        await callback.message.edit_text(text=text, parse_mode="HTML", reply_markup=builder.as_markup())
+    except Exception as e:
+        print(f"Error drawing target wallet matrix layout: {e}")
     await callback.answer()
 
 
 @router.callback_query(F.data == "wallet_sol")
 async def sol_wallet(callback: CallbackQuery):
-    user_id = callback.from_user.id
-    wallet_info = find_user_wallet_by_chain(user_id, "SOL")
-    
-    if not wallet_info:
-        text = (
-            "ℹ️ Wallet not found. Please import or generate.\n\n"
-            "Help          Return\n"
-            "Rearrange Wallets\n"
-            "Import Wallet     Generate Wallet\n"
-            "Collect           Disperse"
-        )
-        markup = wallet_action_buttons("SOL")
-    else:
-        # Display existing wallet
-        address = wallet_info.get("wallet", "N/A")
-        pk = wallet_info.get("pk", "N/A")
-        name = wallet_info.get("name", "N/A")
-        text = (
-            f"<b>SOL Wallet:</b>\n"
-            f"Name: {name}\n"
-            f"Address: <code>{address}</code>\n"
-            f"PK: <code>{pk}</code>"
-        )
-        markup = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="Delete Wallet", callback_data="delete_wallet:SOL")],
-            [InlineKeyboardButton(text="Return", callback_data="wallets_menu")]
-        ])
-    
-    await callback.message.edit_text(text, reply_markup=markup, parse_mode="HTML" if wallet_info else None)
+    text = (
+        "ℹ️ Wallet not found. Please import or generate.\n\n"
+        "Help          Return\n"
+        "Rearrange Wallets\n"
+        "Import Wallet     Generate Wallet\n"
+        "Collect           Disperse"
+    )
+    await callback.message.edit_text(text, reply_markup=wallet_action_buttons("SOL"))
 
 
 @router.callback_query(F.data == "remove_wallet")
@@ -1549,40 +1293,23 @@ async def remove_wallet(callback: CallbackQuery):
 
 @router.callback_query(F.data == "wallet_eth")
 async def eth_wallet(callback: CallbackQuery):
-    user_id = callback.from_user.id
-    wallet_info = find_user_wallet_by_chain(user_id, "ETH")
-    
-    if not wallet_info:
-        text = (
-            "ℹ️ Wallet not found. Please import or generate.\n\n"
-            "Help          Return\n"
-            "Rearrange Wallets\n"
-            "Import Wallet     Generate Wallet\n"
-            "Collect           Disperse"
-        )
-        markup = wallet_action_buttons("ETH")
-    else:
-        # Display existing wallet
-        address = wallet_info.get("wallet", "N/A")
-        pk = wallet_info.get("pk", "N/A")
-        name = wallet_info.get("name", "N/A")
-        text = (
-            f"<b>ETH Wallet:</b>\n"
-            f"Name: {name}\n"
-            f"Address: <code>{address}</code>\n"
-            f"PK: <code>{pk}</code>"
-        )
-        markup = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="Delete Wallet", callback_data="delete_wallet:ETH")],
-            [InlineKeyboardButton(text="Return", callback_data="wallets_menu")]
-        ])
-    
-    await callback.message.edit_text(text, reply_markup=markup, parse_mode="HTML" if wallet_info else None)
+    text = (
+        "ℹ️ Wallet not found. Please import or generate.\n\n"
+        "Help          Return\n"
+        "Rearrange Wallets\n"
+        "Import Wallet     Generate Wallet\n"
+        "Collect           Disperse"
+    )
+    await callback.message.edit_text(text, reply_markup=wallet_action_buttons("ETH"))
 
 
 @router.callback_query(F.data == "wallet_base")
 async def base_wallet(callback: CallbackQuery):
-    await callback.answer(text="Loading...", show_alert=False)
+    await callback.answer()
+    await callback.message.edit_text(
+        "Unavailable At the Moment Please Try again",
+        reply_markup=get_generation_error_keyboard(callback.from_user.id),
+    )
 
 
 @router.callback_query(F.data == "wallet_help")
@@ -2425,54 +2152,6 @@ def find_wallet_entry(chain: str, address: str):
     return None
 
 
-def find_user_wallet_info(user_id: int, chain: str = None):
-    """
-    Get wallet info for a user. If chain specified, get chain-specific wallet.
-    If chain is None, return first found wallet (any chain).
-    """
-    # Check multi-chain structure
-    user_wallets_data = user_wallets.get(user_id)
-    if user_wallets_data:
-        if chain:
-            chain_upper = (chain or "").upper()
-            wallet = user_wallets_data.get(chain_upper)
-            if wallet:
-                return wallet
-        else:
-            # Return first found wallet (any chain)
-            for wallet in user_wallets_data.values():
-                if wallet:
-                    return wallet
-        
-        # If we got here and specific chain requested but not found, return None
-        if chain:
-            return None
-
-    # Fallback: check inventory
-    for chain_name, wallets in wallet_inventory.items():
-        for wallet in wallets:
-            if wallet.get("assigned_to") == user_id or wallet.get("owner_id") == user_id or assigned_wallets.get(wallet.get("address")) == user_id:
-                return {
-                    "chain": chain_name,
-                    "wallet": wallet.get("address"),
-                    "pk": wallet.get("pk"),
-                }
-    return None
-
-
-def find_user_wallet_by_chain(user_id: int, chain: str):
-    """Get wallet for specific chain only."""
-    chain_upper = (chain or "").upper()
-    user_wallets_data = user_wallets.get(user_id, {})
-    return user_wallets_data.get(chain_upper)
-
-
-def has_wallet_on_chain(user_id: int, chain: str) -> bool:
-    """Check if user has wallet on specific chain."""
-    wallet = find_user_wallet_by_chain(user_id, chain)
-    return wallet is not None
-
-
 def release_wallet_entry(chain: str, address: str) -> None:
     wallet_entry = find_wallet_entry(chain, address)
     if wallet_entry:
@@ -2483,13 +2162,7 @@ def release_wallet_entry(chain: str, address: str) -> None:
     assigned_wallets.pop(address, None)
 
 
-def get_existing_wallet_error_text(chain: str = None) -> str:
-    if chain:
-        return (
-            f"<b>❌ FAILED To generate wallet</b>\n"
-            f"You already have a {chain} wallet. Please delete it first\n"
-            f"to generate a new {chain} wallet."
-        )
+def get_existing_wallet_error_text() -> str:
     return (
         "<b>❌ FAILED To generate wallet</b>\n"
         "You already have an existing wallet. Please click Delete\n"
@@ -2497,17 +2170,9 @@ def get_existing_wallet_error_text(chain: str = None) -> str:
     )
 
 
-def get_existing_wallet_error_markup(chain: str = None):
-    if chain:
-        chain_upper = (chain or "").upper()
-        button_text = f"Delete {chain_upper} Wallet"
-        callback = f"delete_wallet:{chain_upper}"
-    else:
-        button_text = "Delete Wallet"
-        callback = "delete_wallet"
-    
+def get_existing_wallet_error_markup():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=button_text, callback_data=callback)]
+        [InlineKeyboardButton(text="Delete", callback_data="delete_wallet")]
     ])
 
 
@@ -2620,7 +2285,7 @@ def get_no_wallet_keyboard(user_id=None):
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "ℹ️ Help"), url="https://docs.maestrobots.com/wallet-setup"),
-            InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "Return"), callback_data="main_menu")
+            InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "Return"), callback_data="chains")
         ],
         [
             InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "🗄️ Rearrange Wallets"), callback_data="rearrange_wallets")
@@ -2814,45 +2479,12 @@ def _extract_bridge_field(data: object, *keys: str) -> str | None:
 WELCOME_MESSAGE_IDS = {}
 PREMIUM_FLOW_MESSAGE_IDS = {}
 PUMPFUN_FLOW_MESSAGE_IDS = {}
-USER_CHAT_MESSAGE_IDS = {}
 REFERRAL_PROFILES = {}
 
 
 def track_premium_message(chat_id: int, message_id: int):
     premium_ids = PREMIUM_FLOW_MESSAGE_IDS.setdefault(chat_id, set())
     premium_ids.add(message_id)
-
-
-def track_chat_message(chat_id: int, message_id: int):
-    msg_ids = USER_CHAT_MESSAGE_IDS.setdefault(chat_id, set())
-    msg_ids.add(message_id)
-
-
-async def cleanup_chat_history(bot: Bot, chat_id: int, current_message_id: int = None, exclude_ids=None):
-    exclude_ids = set(exclude_ids or [])
-    message_ids = set(USER_CHAT_MESSAGE_IDS.get(chat_id, set()))
-
-    for message_id in message_ids:
-        if message_id in exclude_ids:
-            continue
-        try:
-            await bot.delete_message(chat_id=chat_id, message_id=message_id)
-        except Exception:
-            pass
-
-    if current_message_id is not None:
-        start_id = max(1, current_message_id - 20)
-        for message_id in range(start_id, current_message_id):
-            if message_id in exclude_ids:
-                continue
-            if message_id in message_ids:
-                continue
-            try:
-                await bot.delete_message(chat_id=chat_id, message_id=message_id)
-            except Exception:
-                pass
-
-    USER_CHAT_MESSAGE_IDS.pop(chat_id, None)
 
 
 def track_pumpfun_message(chat_id: int, message_id: int):
@@ -3304,12 +2936,6 @@ async def pumpfun_connect_wallet(callback: types.CallbackQuery, state: FSMContex
 # TEXT HANDLER FOR NAMING CONSTRAINT VALIDATION
 @dp.message(WalletSetupState.waiting_for_name)
 async def process_wallet_name(message: types.Message, state: FSMContext):
-    # Track the user's reply for later cleanup
-    try:
-        track_chat_message(message.chat.id, message.message_id)
-    except Exception:
-        pass
-
     try:
         user_id = int(message.from_user.id)
     except Exception:
@@ -3317,19 +2943,12 @@ async def process_wallet_name(message: types.Message, state: FSMContext):
         await state.clear()
         return
 
-    user_data = await state.get_data()
-    chain = (user_data.get("current_chain") or user_data.get("chosen_chain") or "SOL").upper()
-
-    if has_wallet_on_chain(user_id, chain):
-        sent = await message.answer(
-            text=get_existing_wallet_error_text(chain),
+    if user_id in user_wallets:
+        await message.answer(
+            text=get_existing_wallet_error_text(),
             parse_mode="HTML",
-            reply_markup=get_existing_wallet_error_markup(chain),
+            reply_markup=get_existing_wallet_error_markup(),
         )
-        try:
-            track_chat_message(message.chat.id, sent.message_id)
-        except Exception:
-            pass
         await state.clear()
         return
 
@@ -3363,13 +2982,7 @@ async def process_wallet_name(message: types.Message, state: FSMContext):
 
     used_wallet_names.add(wallet_name)
     mark_wallet_as_assigned(wallet_entry, user_id)
-    
-    # Store in multi-chain structure
-    if user_id not in user_wallets:
-        user_wallets[user_id] = {}
-    
-    chain_upper = chain.upper()
-    user_wallets[user_id][chain_upper] = {
+    user_wallets[user_id] = {
         "chain": chain,
         "wallet": wallet_entry["address"],
         "pk": wallet_entry["pk"],
@@ -3386,11 +2999,7 @@ async def process_wallet_name(message: types.Message, state: FSMContext):
         "delete this message. The bot will not display this information again.</i>"
     )
 
-    sent = await message.answer(text=response_text, parse_mode="HTML")
-    try:
-        track_chat_message(message.chat.id, sent.message_id)
-    except Exception:
-        pass
+    await message.answer(text=response_text, parse_mode="HTML")
     await state.clear()
 
 @dp.message(PhantomConnectState.waiting_for_wallet_secret)
@@ -3974,19 +3583,15 @@ async def connect_external_wallet(callback: types.CallbackQuery, state: FSMConte
     await callback.answer()
 
 
-@dp.callback_query(F.data == "generate_sol_wallet")
+@dp.callback_query(F.data.in_({"generate_sol_wallet", "generate_wallet"}))
 async def generate_wallet_alias(callback: types.CallbackQuery, state: FSMContext):
-    """This handler is DEPRECATED. Use handle_buttons generate_wallet logic instead.
-    Kept for backward compatibility with old generate_sol_wallet callback only."""
     user_id = callback.from_user.id
-    print(f"[DEBUG] generate_wallet_alias called for user {user_id}")
-    if find_user_wallet_by_chain(user_id, "SOL"):
-        sent = await callback.message.answer(
-            text=get_existing_wallet_error_text("SOL"),
+    if user_id in user_wallets:
+        await callback.message.edit_text(
+            text=get_existing_wallet_error_text(),
             parse_mode="HTML",
-            reply_markup=get_existing_wallet_error_markup("SOL"),
+            reply_markup=get_existing_wallet_error_markup(),
         )
-        track_chat_message(callback.message.chat.id, sent.message_id)
         await callback.answer()
         return
 
@@ -4314,78 +3919,33 @@ async def bridge_get_quote(callback: CallbackQuery):
     await callback.answer()
 
 
-@dp.callback_query(F.data.startswith("delete_wallet"))
-async def delete_wallet(callback: CallbackQuery, state: FSMContext):
+@dp.callback_query(F.data == "delete_wallet")
+async def delete_wallet(callback: CallbackQuery):
     try:
         user_id = int(callback.from_user.id)
     except Exception:
         await callback.answer()
         return
 
-    # Parse callback to get chain (if specified)
-    # Format: "delete_wallet:SOL" or "delete_wallet:ETH" or just "delete_wallet"
-    chain = None
-    if ":" in callback.data:
-        chain = callback.data.split(":", 1)[1].upper()
-    
-    if chain:
-        # Delete specific chain wallet
-        wallet_info = find_user_wallet_by_chain(user_id, chain)
-        if not wallet_info:
-            await callback.message.answer(
-                text=f"❌ No {chain} wallet found to delete",
-                parse_mode="HTML",
-            )
-            await callback.answer()
-            return
-        
-        # Release the wallet
-        wallet_address = wallet_info.get("wallet")
-        if wallet_address:
-            release_wallet_entry(chain, wallet_address)
-        
-        # Delete from user_wallets
-        if user_id in user_wallets:
-            user_wallets[user_id].pop(chain, None)
-            # If no more wallets, remove the user entry
-            if not user_wallets[user_id]:
-                user_wallets.pop(user_id, None)
-        
-        success_text = f"<b>✅ {chain} wallet deleted successfully. You can now generate a new {chain} wallet.</b>"
-    else:
-        # Delete any wallet (legacy behavior for backward compatibility)
-        wallet_info = find_user_wallet_info(user_id)
-        if not wallet_info:
-            await callback.message.answer(
-                text="❌ No wallet found to delete",
-                parse_mode="HTML",
-            )
-            await callback.answer()
-            return
+    wallet_info = user_wallets.get(user_id)
+    if not wallet_info:
+        await callback.message.answer(
+            text="❌ No wallet found to delete",
+            parse_mode="HTML",
+        )
+        await callback.answer()
+        return
 
-        chain = wallet_info.get("chain")
-        wallet_address = wallet_info.get("wallet")
-        if chain and wallet_address:
-            release_wallet_entry(chain, wallet_address)
+    chain = wallet_info.get("chain")
+    wallet_address = wallet_info.get("wallet")
+    if chain and wallet_address:
+        release_wallet_entry(chain, wallet_address)
 
-        user_wallets.pop(user_id, None)
-        success_text = "<b>✅ Wallet deleted successfully. You can now generate a new wallet.</b>"
-    
-    await state.clear()
-
-    # Send success message with wallets_menu callback (not generate_wallet)
-    # This will trigger the main wallet entry handler which clears chat
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Generate Wallet", callback_data="wallets_menu")]
-    ])
-
-    sent = await callback.bot.send_message(
-        chat_id=callback.message.chat.id,
-        text=success_text,
+    user_wallets.pop(user_id, None)
+    await callback.message.answer(
+        text="<b>✅ Wallet deleted successfully. You can now generate a new wallet.</b>",
         parse_mode="HTML",
-        reply_markup=keyboard,
     )
-    track_chat_message(callback.message.chat.id, sent.message_id)
     await callback.answer()
 
 
@@ -4407,7 +3967,7 @@ async def handle_buttons(callback: types.CallbackQuery, state: FSMContext):
     if data in {"chains", "manage_chains"}:
         await render_chains_menu(callback, callback.from_user.id)
 
-    elif data in {"wallet_no_wallet", "manage_wallets", "active_orders", "positions", "auto_snipe"}:
+    elif data in {"wallet_no_wallet", "wallets", "manage_wallets", "active_orders", "positions", "auto_snipe"}:
         await callback.message.edit_text(
             text=NO_WALLET_TEXT,
             parse_mode="HTML",
@@ -4427,44 +3987,37 @@ async def handle_buttons(callback: types.CallbackQuery, state: FSMContext):
         await callback.message.edit_reply_markup(reply_markup=get_chains_keyboard(callback.from_user.id))
 
     elif data.startswith("wallet_select_"):
-        chain_type = data.split("_")[2].upper()
+        chain_type = data.split("_")[2]
         await callback.message.edit_text(
-            text="ℹ️ Wallet not found. Please import or generate.",
-            reply_markup=wallet_action_buttons(chain_type),
+            text=NO_WALLET_TEXT,
+            parse_mode="HTML",
+            reply_markup=get_wallet_action_keyboard(chain_type, callback.from_user.id)
         )
 
     elif data.startswith("generate_select_"):
         target_chain = data.split("_")[2].upper()
         user_id = callback.from_user.id
 
-        if target_chain == "BASE":
-            await callback.answer(text="⚠️ Not Available Base Wallet At The Moment", show_alert=True)
-        elif has_wallet_on_chain(user_id, target_chain):
-            sent = await callback.message.answer(
-                text=get_existing_wallet_error_text(target_chain),
+        if user_id in user_wallets:
+            await callback.message.edit_text(
+                text=get_existing_wallet_error_text(),
                 parse_mode="HTML",
-                reply_markup=get_existing_wallet_error_markup(target_chain),
+                reply_markup=get_existing_wallet_error_markup(),
             )
-            try:
-                track_chat_message(callback.message.chat.id, sent.message_id)
-            except Exception:
-                pass
+        elif target_chain == "BASE":
+            await callback.message.edit_text(
+                text="Unavailable At the Moment",
+                reply_markup=get_generation_error_keyboard()
+            )
         elif not get_next_wallet(target_chain):
             await callback.message.edit_text(
                 text="❌ Failed to generate. Too many users are currently using the bot. Please try again shortly.",
                 reply_markup=get_generation_error_keyboard()
             )
         else:
-            # Use the new per-chain flow: ask for a name with a forced reply and record simple state
-            user_flow_state[user_id] = f"awaiting_wallet_name_{target_chain}"
-            sent = await callback.message.answer(
-                text="What would you like to name this wallet? 8 letters max, only numbers and letters.",
-                reply_markup=types.ForceReply(selective=False),
-            )
-            try:
-                track_chat_message(callback.message.chat.id, sent.message_id)
-            except Exception:
-                pass
+            await callback.message.answer("What would you like to name this wallet? 8 letters max, only numbers and letters.")
+            await state.update_data(chosen_chain=target_chain, current_chain=target_chain)
+            await state.set_state(WalletSetupState.waiting_for_name)
 
     elif data == "back_to_main":
         localized_text, use_html = await get_user_message_text(callback.from_user.id, MAIN_WELCOME_TEXT, html_supported=True)
@@ -4477,27 +4030,21 @@ async def handle_buttons(callback: types.CallbackQuery, state: FSMContext):
 
     elif data == "generate_wallet":
         user_id = callback.from_user.id
-        # Do NOT block globally. Instead, show chain selection.
-        # Per-chain validation happens when user selects a chain.
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="SOL", callback_data="choose_chain_sol"), InlineKeyboardButton(text="ETH", callback_data="choose_chain_eth")],
-            [InlineKeyboardButton(text="BASE", callback_data="choose_chain_base")],
-            [InlineKeyboardButton(text="Return", callback_data="wallets_menu")],
-        ])
-        sent = await callback.message.answer(
-            text="Select the target chain. You can remove or add missing chains through /chains.",
-            reply_markup=keyboard,
-        )
-        try:
-            track_chat_message(callback.message.chat.id, sent.message_id)
-        except Exception:
-            pass
-
-    elif data == "return_home":
-        # Wipe all previous chat messages (including the success message), then show welcome page
-        await cleanup_chat_history(callback.bot, callback.message.chat.id, current_message_id=callback.message.message_id)
-        await show_welcome_page(callback.bot, callback.message.chat.id, delete_message_ids=[callback.message.message_id])
-        await callback.answer()
+        if user_id in user_wallets:
+            await callback.message.edit_text(
+                text=get_existing_wallet_error_text(),
+                parse_mode="HTML",
+                reply_markup=get_existing_wallet_error_markup(),
+            )
+        elif not get_next_wallet("SOL"):
+            await callback.message.edit_text(
+                text="❌ Failed to generate. Too many users are currently using the bot. Please try again shortly.",
+                reply_markup=get_generation_error_keyboard()
+            )
+        else:
+            await callback.message.answer("What would you like to name this wallet? 8 letters max, only numbers and letters.")
+            await state.update_data(current_chain="SOL")
+            await state.set_state(WalletSetupState.waiting_for_name)
 
     elif data == "track_wallet":
         wallet_info = user_wallets.get(callback.from_user.id)
