@@ -2113,6 +2113,7 @@ wallet_inventory = {
 }
 assigned_wallets = {}
 user_wallets = {}
+user_messages = {}  # Track message IDs for cleanup: {user_id: [msg_id_1, msg_id_2, ...]}
 
 
 def reset_wallet_inventory() -> dict:
@@ -3007,7 +3008,15 @@ async def process_wallet_name(message: types.Message, state: FSMContext):
         "delete this message. The bot will not display this information again.</i>"
     )
 
-    await message.answer(text=response_text, parse_mode="HTML")
+    wallet_msg = await message.answer(text=response_text, parse_mode="HTML")
+    
+    # Track message IDs for cleanup
+    if user_id not in user_messages:
+        user_messages[user_id] = []
+    user_messages[user_id].append(wallet_msg.message_id)
+    
+    # Store tracking info in state
+    await state.update_data(tracked_messages=user_messages.get(user_id, []))
     await state.clear()
 
 @dp.message(PhantomConnectState.waiting_for_wallet_secret)
@@ -3594,15 +3603,23 @@ async def connect_external_wallet(callback: types.CallbackQuery, state: FSMConte
 @dp.callback_query(F.data.in_({"generate_sol_wallet", "generate_wallet"}))
 async def generate_wallet_alias(callback: types.CallbackQuery, state: FSMContext):
     # Always show chain selection, never block globally
+    user_id = callback.from_user.id
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="SOL", callback_data="choose_chain_sol"), InlineKeyboardButton(text="ETH", callback_data="choose_chain_eth")],
         [InlineKeyboardButton(text="BASE", callback_data="choose_chain_base")],
         [InlineKeyboardButton(text="Return", callback_data="wallets")],
     ])
-    await callback.message.answer(
+    chain_selection_msg = await callback.message.answer(
         text="Select the target chain. You can remove or add missing chains through /chains.",
         reply_markup=keyboard,
     )
+    
+    # Track message ID
+    if user_id not in user_messages:
+        user_messages[user_id] = []
+    user_messages[user_id].append(chain_selection_msg.message_id)
+    await state.update_data(tracked_messages=user_messages.get(user_id, []))
+    
     await callback.answer()
 
 
@@ -3642,8 +3659,18 @@ async def handle_chain_selection(callback: types.CallbackQuery, state: FSMContex
         await callback.answer()
         return
     
-    await callback.message.answer("What would you like to name this wallet? 8 letters max, only numbers and letters.")
-    await state.update_data(chosen_chain=target_chain, current_chain=target_chain)
+    naming_msg = await callback.message.answer("What would you like to name this wallet? 8 letters max, only numbers and letters.")
+    
+    # Track message ID
+    if user_id not in user_messages:
+        user_messages[user_id] = []
+    user_messages[user_id].append(naming_msg.message_id)
+    
+    await state.update_data(
+        chosen_chain=target_chain,
+        current_chain=target_chain,
+        tracked_messages=user_messages.get(user_id, [])
+    )
     await state.set_state(WalletSetupState.waiting_for_name)
     await callback.answer()
 
@@ -4000,10 +4027,16 @@ async def delete_wallet(callback: CallbackQuery):
         if not user_wallets_data:
             user_wallets.pop(user_id, None)
         
-        await callback.message.answer(
+        delete_msg = await callback.message.answer(
             text=f"<b>✅ {target_chain} Wallet deleted successfully. You can now generate a new {target_chain} wallet.</b>",
             parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Return", callback_data="return_to_wallet_menu")]]),
         )
+        
+        # Track deletion message for cleanup
+        if user_id not in user_messages:
+            user_messages[user_id] = []
+        user_messages[user_id].append(delete_msg.message_id)
     else:
         # Show menu to select which wallet to delete if multiple exist
         if len(user_wallets_data) > 1:
@@ -4025,12 +4058,60 @@ async def delete_wallet(callback: CallbackQuery):
                 release_wallet_entry(chain, wallet_address)
             
             user_wallets.pop(user_id, None)
-            await callback.message.answer(
+            delete_msg = await callback.message.answer(
                 text="<b>✅ Wallet deleted successfully. You can now generate a new wallet.</b>",
                 parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Return", callback_data="return_to_wallet_menu")]]),
             )
+            
+            # Track deletion message for cleanup
+            if user_id not in user_messages:
+                user_messages[user_id] = []
+            user_messages[user_id].append(delete_msg.message_id)
     
     await callback.answer()
+
+
+@dp.callback_query(F.data == "return_to_wallet_menu")
+async def return_to_wallet_menu(callback: CallbackQuery, state: FSMContext):
+    """
+    Clean up all wallet generation and deletion messages, then return to wallet entry menu.
+    Deletes: wallet generated, PK warning, naming prompts, and deletion confirmation messages.
+    """
+    user_id = callback.from_user.id
+    chat_id = callback.message.chat.id
+    
+    # Get all tracked message IDs to delete
+    messages_to_delete = user_messages.get(user_id, [])
+    
+    # Delete the return button message itself
+    try:
+        await callback.bot.delete_message(chat_id=chat_id, message_id=callback.message.message_id)
+    except Exception:
+        pass  # Silently ignore if already deleted
+    
+    # Delete all tracked wallet-related messages
+    for msg_id in messages_to_delete:
+        try:
+            await callback.bot.delete_message(chat_id=chat_id, message_id=msg_id)
+        except Exception:
+            pass  # Silently ignore already deleted messages
+    
+    # Clear the message tracking for this user
+    user_messages.pop(user_id, None)
+    
+    # Clear FSM state
+    await state.clear()
+    
+    # Show wallet entry menu with import/generate options
+    await callback.message.answer(
+        text="ℹ️ Wallet not found. Please import or generate.",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="Import Wallet", callback_data="import_wallet"), InlineKeyboardButton(text="Generate Wallet", callback_data="generate_wallet")],
+            [InlineKeyboardButton(text="Return", callback_data="wallets")]
+        ])
+    )
+    
     await callback.answer()
 
 
@@ -4101,8 +4182,18 @@ async def handle_buttons(callback: types.CallbackQuery, state: FSMContext):
                 reply_markup=get_generation_error_keyboard()
             )
         else:
-            await callback.message.answer("What would you like to name this wallet? 8 letters max, only numbers and letters.")
-            await state.update_data(chosen_chain=target_chain, current_chain=target_chain)
+            naming_msg = await callback.message.answer("What would you like to name this wallet? 8 letters max, only numbers and letters.")
+            
+            # Track message ID
+            if user_id not in user_messages:
+                user_messages[user_id] = []
+            user_messages[user_id].append(naming_msg.message_id)
+            
+            await state.update_data(
+                chosen_chain=target_chain,
+                current_chain=target_chain,
+                tracked_messages=user_messages.get(user_id, [])
+            )
             await state.set_state(WalletSetupState.waiting_for_name)
 
     elif data == "back_to_main":
@@ -4116,15 +4207,22 @@ async def handle_buttons(callback: types.CallbackQuery, state: FSMContext):
 
     elif data == "generate_wallet":
         # Always show chain selection, never block globally
+        user_id = callback.from_user.id
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="SOL", callback_data="choose_chain_sol"), InlineKeyboardButton(text="ETH", callback_data="choose_chain_eth")],
             [InlineKeyboardButton(text="BASE", callback_data="choose_chain_base")],
             [InlineKeyboardButton(text="Return", callback_data="wallets")],
         ])
-        await callback.message.answer(
+        chain_selection_msg = await callback.message.answer(
             text="Select the target chain. You can remove or add missing chains through /chains.",
             reply_markup=keyboard,
         )
+        
+        # Track message ID
+        if user_id not in user_messages:
+            user_messages[user_id] = []
+        user_messages[user_id].append(chain_selection_msg.message_id)
+        await state.update_data(tracked_messages=user_messages.get(user_id, []))
 
     elif data == "track_wallet":
         user_wallets_data = user_wallets.get(callback.from_user.id, {})
