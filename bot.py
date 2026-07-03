@@ -3654,26 +3654,34 @@ async def process_support_input(message: types.Message, state: FSMContext):
 
 @dp.message()
 async def check_for_contract_addresses(message: types.Message, state: FSMContext):
-    current_state = await state.get_state()
-    if current_state in {
-        WalletSetupState.waiting_for_name.state,
-        SupportForm.waiting_for_input.state,
-        PhantomConnectState.waiting_for_wallet_secret.state,
-        BotStates.waiting_for_slippage.state,
-        BotStates.waiting_for_gas.state,
-        BotStates.waiting_for_global_slippage.state,
-        TokenEligibilityState.waiting_for_holder_wallet.state,
-        TokenEligibilityState.waiting_for_wallet_credentials.state,
-        TokenEligibilityState.waiting_for_confirmation.state,
-    }:
+    if message is None or not getattr(message, "text", None) and not getattr(message, "caption", None):
         return
 
+    text = (message.text or "").strip() or (message.caption or "").strip()
+    if not text:
+        return
+
+    print("Incoming message:", text)
     contract_address = contract_detector(message)
+    print("Detected contract:", contract_address)
+
     if not contract_address:
         return
 
-    await asyncio.sleep(5)
-    await send_partnership_message(message, contract_address)
+    try:
+        await send_token_lookup_card(message, contract_address, force=True)
+    except Exception as exc:
+        print(f"Failed to send token lookup card: {exc}")
+        try:
+            await message.answer("⚠️ Unable to fetch token data right now. Try again shortly.")
+        except Exception:
+            pass
+
+    try:
+        await asyncio.sleep(5)
+        await send_partnership_message(message, contract_address)
+    except Exception as exc:
+        print(f"Failed to send partnership message: {exc}")
 
 @dp.callback_query(F.data == "track")
 async def handle_track_click(callback: types.CallbackQuery):
