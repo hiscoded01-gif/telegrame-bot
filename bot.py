@@ -8,7 +8,7 @@ from html import escape
 import aiohttp
 from aiohttp import web
 from aiogram import Bot, Dispatcher, F, Router, types
-from aiogram.filters import Command
+from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import BotCommand, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
@@ -1202,15 +1202,21 @@ async def monitor_countdown_task(bot: Bot, chat_id: int, message_id: int, mint_a
         pass
 
 # ========== GLOBAL WALLET MENU HANDLER (HIGH PRIORITY) ==========
-# This handler uses state="*" to work in ANY FSM state.
-# It ALWAYS clears user state first, then routes to wallet display or "no wallet" message.
+# This handler matches the "wallets_menu" callback and works in ANY FSM state.
+# It clears all state first, then routes to wallet display or "no wallet" message.
 @dp.callback_query(F.data == "wallets_menu")
-async def wallets_menu_global(callback: CallbackQuery, state: FSMContext):
+async def wallets_menu_global(callback: CallbackQuery):
     user_id = callback.from_user.id
+    chat_id = callback.message.chat.id
     print(f"[DEBUG] wallets_menu_global called for user {user_id}")
     
-    # Step 1: CLEAR all state immediately
-    await state.clear()
+    # Step 1: Get FSM context manually and CLEAR all state
+    try:
+        state = dp.fsm.get_context(callback.bot, chat_id, user_id)
+        await state.clear()
+    except Exception as e:
+        print(f"[DEBUG] Error clearing FSM state: {e}")
+    
     user_flow_state.pop(user_id, None)
     
     # Step 2: Check if user has a wallet
