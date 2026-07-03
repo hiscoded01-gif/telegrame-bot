@@ -2628,8 +2628,8 @@ def build_referral_detail_text(profile: dict, username: str | None = None) -> st
 def get_premium_keyboard(user_id=None):
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "Pay in $SOL (SOL)"), callback_data="premium_pay_sol"),
-            InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "Pay in $ETH (ETH)"), callback_data="premium_pay_eth"),
+            InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "Buy Premium"), callback_data="premium_pay_sol"),
+            InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "Extend Subscription"), callback_data="premium_pay_eth"),
         ],
         [
             InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "Pay in $USDT (USDT)"), callback_data="premium_pay_usdt"),
@@ -2666,22 +2666,26 @@ CASHBACK_TIERS_TEXT = (
 )
 
 PREMIUM_BENEFITS_TEXT = (
-    "Premium: ❌\n\n"
-    "Premium Benefits ⭐️\n"
-    "└ Speed Boost: Dedicated Premium Bot (up to 30% faster) 🤖\n"
-    "└ Launch Tax/Deadblock Simulation 🕵️‍♂️\n"
-    "└ 10 ➡️ 30 Trade Monitors\n"
-    "└ 8 ➡️ 10 Token Limit Orders/Wallet\n"
-    "└ 36 ➡️ 96 Hour Trades\n"
-    "└ 5 ➡️ 10 Multi-Wallets\n"
-    "└ 5 ➡️ 12 Copytrade Wallets\n"
-    "└ 5 ➡️ 10 Concurrent Snipes\n"
-    "└ Token Hits 👀\n"
-    "└ Maestro Trending List 💎\n"
-    "└ Maestro Yacht Club Membership 💎\n"
-    "└ First-Class Support\n"
-    "└ Future Unrevealed Benefits\n\n"
-    "🛒 Buy for $200 per 30 days! Use the pay buttons below to start or extend your subscription."
+    "✨💎** UNLOCK PREMIUM ACCESS **💎✨`━━━━━━━━━━━━━━━━━━━━━━━`\n"
+    "⚡️** EXECUTION POWER\n"
+    "**`┌────────────────────│ `⚡️ Lightning Snipe Engine  `│ `🚀 Priority Execution Queue  `│ `🎯 Ultra-Fast Trade Routing  `└────────────────────`\n"
+    "🧠** SMART TRADING AI\n"
+    "**`┌────────────────────│ `🧠 AI Entry & Exit Suggestions  `│ `🔄 Auto Profit System (TP / SL / Trailing)  `│ `🧪 Launch Simulation & Tax Analyzer  `└────────────────────`\n"
+    "🐋** ALPHA & MARKET EDGE\n"
+    "**`┌────────────────────│ `🐋 Smart Whale Tracking Alerts  `│ `👁 Hidden Token Activity Detection  `│ `📊 Private Alpha Feed (Early Gems)  `└────────────────────`\n"
+    "🛡** SECURITY & RISK CONTROL\n"
+    "**`┌────────────────────│ `🛡 Advanced Token Risk Scanner  `│ `🔍 Contract Behavior Analysis  `└────────────────────`\n"
+    "🎯** ADVANCED STRATEGIES\n"
+    "**`┌────────────────────│ `🎯 Elite Copy Trading Engine  `│ `💼 Multi-Wallet Strategy Mode  `│ `⚙️ Precision Trade Control  `└────────────────────`\n"
+    "🏆** VIP STATUS\n"
+    "**`┌────────────────────│ `🏆 Premium Badge  `│ `🔐 Exclusive Access  `│ `💬 First-Class Support  `└────────────────────`\n"
+    "📈** EXPANDED LIMITS\n"
+    "**`┌────────────────────│ `📊 More Monitors & Snipes  `│ `💰 Higher Trade Capacity  `│ `⚡️ Enhanced Performance  `└────────────────────`━━━━━━━━━━━━━━━━━━━━━━━`\n"
+    "🚀** YOU’RE NOT JUST TRADING…\n"
+    "**💼** YOU’RE OPERATING LIKE A PRO\n"
+    "**`━━━━━━━━━━━━━━━━━━━━━━━`\n"
+    "💎** Premium Access\n"
+    "**`$200 / 60 Days`"
 )
 
 MAIN_WELCOME_TEXT = (
@@ -2808,19 +2812,12 @@ async def pumpfun_command(message: types.Message):
 
 
 async def render_premium_menu(bot: Bot, chat_id: int, message_id=None):
+    # Premium menu must always be displayed as a standalone send_message page.
     if message_id is not None:
         try:
-            await bot.edit_message_text(
-                chat_id=chat_id,
-                message_id=message_id,
-                text=PREMIUM_BENEFITS_TEXT,
-                parse_mode="HTML",
-                reply_markup=get_premium_keyboard(chat_id),
-            )
+            await bot.delete_message(chat_id=chat_id, message_id=message_id)
         except Exception:
             pass
-        track_premium_message(chat_id, message_id)
-        return None
 
     sent = await bot.send_message(
         chat_id=chat_id,
@@ -3763,9 +3760,8 @@ async def premium_pay(callback: types.CallbackQuery):
     track_premium_message(callback.message.chat.id, callback.message.message_id)
     await callback.message.edit_text(
         text=(
-            "Premium: ❌\n\n"
-            f"The bot will now generate a wallet for a {meta['amount']} deposit.\n\n"
-            "⚠️ THIS PURCHASE IS NON-REFUNDABLE. Click ✅ Yes to proceed."
+            "<b>Premium purchase is being prepared.</b>\n\n"
+            f"You will be guided to complete the payment via {meta['label']} for {meta['amount']}."
         ),
         parse_mode="HTML",
         reply_markup=get_premium_confirm_keyboard(currency),
@@ -3780,9 +3776,8 @@ async def premium_confirm_yes(callback: types.CallbackQuery):
     track_premium_message(callback.message.chat.id, callback.message.message_id)
     await callback.message.edit_text(
         text=(
-            "Premium: ❌\n\n"
-            f"Deposit Exactly {meta['amount']} to the SOL wallet below\n"
-            f"<i>{meta['address']}</i>\n\n"
+            f"Deposit Exactly {meta['amount']} to the wallet below:\n"
+            f"<code>{meta['address']}</code>\n\n"
             "Click I Have Paid once the transaction is sent."
         ),
         parse_mode="HTML",
@@ -3804,9 +3799,8 @@ async def premium_back_confirm(callback: types.CallbackQuery):
     track_premium_message(callback.message.chat.id, callback.message.message_id)
     await callback.message.edit_text(
         text=(
-            "Premium: ❌\n\n"
-            f"The bot will now generate a wallet for a {meta['amount']} deposit.\n\n"
-            "⚠️ THIS PURCHASE IS NON-REFUNDABLE. Click ✅ Yes to proceed."
+            "<b>Premium purchase is being prepared.</b>\n\n"
+            f"You will be guided to complete the payment via {meta['label']} for {meta['amount']}."
         ),
         parse_mode="HTML",
         reply_markup=get_premium_confirm_keyboard(currency),
