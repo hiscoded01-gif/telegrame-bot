@@ -2716,8 +2716,19 @@ async def render_chains_menu(target, user_id: int):
     keyboard = get_chains_keyboard(user_id)
 
     if isinstance(target, CallbackQuery):
-        await target.message.edit_text(text=localized_text, reply_markup=keyboard)
-        await target.answer()
+        try:
+            await target.message.edit_text(text=localized_text, reply_markup=keyboard)
+        except Exception:
+            # Fallback if message is too old or deleted
+            try:
+                await target.message.delete()
+            except Exception:
+                pass
+            await target.bot.send_message(
+                chat_id=target.from_user.id,
+                text=localized_text,
+                reply_markup=keyboard
+            )
     else:
         await target.answer(text=localized_text, reply_markup=keyboard)
 
@@ -4174,6 +4185,81 @@ async def handle_wallet_operations(callback: CallbackQuery):
         # TODO: Implement disperse wallet feature
 
 
+@dp.callback_query(F.data.in_({"wallet_select_sol", "wallet_select_base", "wallet_select_eth"}))
+async def handle_wallet_select(callback: CallbackQuery):
+    """Handle wallet selection from chains menu - forward to view_wallet handler."""
+    # Convert wallet_select_X to view_wallet_X
+    chain = callback.data.split("_")[2].lower()  # Extract 'sol', 'base', or 'eth'
+    user_id = callback.from_user.id
+    chain_upper = chain.upper()
+    
+    if chain_upper == "BASE":
+        await callback.answer(popup_alert("No BASE wallet", ""), show_alert=True)
+        return
+    
+    # Get user's wallet for this chain
+    user_wallets_data = user_wallets.get(user_id, {})
+    wallet_info = user_wallets_data.get(chain_upper)
+    
+    if not wallet_info:
+        # No wallet for this chain
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="Generate Wallet", callback_data=f"choose_chain_{chain}"), InlineKeyboardButton(text="Import Wallet", callback_data="import_wallet")],
+            [InlineKeyboardButton(text="Return", callback_data="chains")],
+        ])
+        try:
+            await callback.message.edit_text(
+                text=f"ℹ️ No {chain_upper} wallet found. Please generate or import one.",
+                reply_markup=keyboard,
+            )
+        except Exception:
+            try:
+                await callback.message.delete()
+            except Exception:
+                pass
+            await callback.bot.send_message(
+                chat_id=callback.from_user.id,
+                text=f"ℹ️ No {chain_upper} wallet found. Please generate or import one.",
+                reply_markup=keyboard,
+            )
+    else:
+        # Display wallet
+        wallet_name = wallet_info.get("name", "Wallet")
+        wallet_address = wallet_info.get("wallet", "")
+        
+        wallet_text = (
+            f"🔗 {chain_upper}\n\n"
+            f"<b>{wallet_name}:</b>\n"
+            f"<code>{wallet_address}</code>\n\n"
+            f"🟢 Default | 🟢 Manual | 💰 0 {chain_upper}\n\n"
+            f"ℹ️ To transfer from a wallet or rename it, click on the wallet name.\n"
+            f"ℹ️ Enable \"Manual\" for the wallets participating in your manual buys. "
+            f"Automated buys will be defaulted to your \"Default\" wallet, but you can further control this through dedicated Signals, Copytrade, and Auto Snipe settings."
+        )
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="ℹ️ Help", url="https://docs.maestrobots.com/wallet-setup"), InlineKeyboardButton(text="Return", callback_data="chains")],
+            [InlineKeyboardButton(text="🗃 Rearrange Wallets", callback_data="rearrange_wallets")],
+            [InlineKeyboardButton(text=f"Default Wallet | {wallet_name}", callback_data=f"set_default_wallet:{chain_upper}")],
+            [InlineKeyboardButton(text=f"⚙️ {wallet_name}", callback_data=f"edit_wallet:{chain_upper}")],
+            [InlineKeyboardButton(text="🟢 Manual", callback_data=f"toggle_manual:{chain_upper}")],
+            [InlineKeyboardButton(text="❌ Delete", callback_data=f"delete_wallet:{chain_upper}")],
+            [InlineKeyboardButton(text="Import Wallet", callback_data="import_wallet"), InlineKeyboardButton(text="Generate Wallet", callback_data=f"choose_chain_{chain}")],
+            [InlineKeyboardButton(text="Collect", callback_data="collect_wallet"), InlineKeyboardButton(text="Disperse", callback_data="disperse_wallet")],
+        ])
+        
+        try:
+            await callback.message.edit_text(wallet_text, parse_mode="HTML", reply_markup=keyboard)
+        except Exception:
+            try:
+                await callback.message.delete()
+            except Exception:
+                pass
+            await callback.bot.send_message(chat_id=user_id, text=wallet_text, parse_mode="HTML", reply_markup=keyboard)
+    
+    await callback.answer()
+
+
 @dp.callback_query(F.data == "bridge_close")
 async def bridge_close(callback: CallbackQuery):
     try:
@@ -4185,12 +4271,11 @@ async def bridge_close(callback: CallbackQuery):
 
 @dp.callback_query()
 async def handle_buttons(callback: types.CallbackQuery, state: FSMContext):
-    await callback.answer()
-
     data = callback.data
 
     if data in {"chains", "manage_chains"}:
         await render_chains_menu(callback, callback.from_user.id)
+        await callback.answer()
 
     elif data in {"wallet_no_wallet", "manage_wallets", "active_orders", "positions", "auto_snipe"}:
         await callback.message.edit_text(
@@ -4234,7 +4319,11 @@ async def handle_buttons(callback: types.CallbackQuery, state: FSMContext):
     elif data.startswith("toggle_"):
         chain = data.split("_")[1].upper()
         network_status[chain] = not network_status[chain]
-        await callback.message.edit_reply_markup(reply_markup=get_chains_keyboard(callback.from_user.id))
+        try:
+            await callback.message.edit_reply_markup(reply_markup=get_chains_keyboard(callback.from_user.id))
+        except Exception:
+            pass
+        await callback.answer()
 
     elif data.startswith("view_wallet_"):
         chain = data.split("_")[2].upper()
