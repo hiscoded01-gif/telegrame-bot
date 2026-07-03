@@ -2946,6 +2946,23 @@ async def process_wallet_name(message: types.Message, state: FSMContext):
         await state.clear()
         return
 
+    # FORCE REPLY VALIDATION: Only accept replies to wallet naming prompts
+    if not message.reply_to_message:
+        await message.answer(
+            text="Please reply directly to the naming prompt message.",
+            reply_markup=types.ForceReply(selective=True),
+        )
+        return
+    
+    # Verify the replied message is the naming prompt
+    replied_text = message.reply_to_message.text or ""
+    if "What would you like to name this wallet" not in replied_text:
+        await message.answer(
+            text="Please reply to the wallet naming prompt, not other messages.",
+            reply_markup=types.ForceReply(selective=True),
+        )
+        return
+
     wallet_name = (message.text or "").strip()
     user_data = await state.get_data()
     chain = (user_data.get("current_chain") or user_data.get("chosen_chain") or "SOL").upper()
@@ -3659,7 +3676,10 @@ async def handle_chain_selection(callback: types.CallbackQuery, state: FSMContex
         await callback.answer()
         return
     
-    naming_msg = await callback.message.answer("What would you like to name this wallet? 8 letters max, only numbers and letters.")
+    naming_msg = await callback.message.answer(
+        "What would you like to name this wallet? 8 letters max, only numbers and letters.",
+        reply_markup=types.ForceReply(selective=True)
+    )
     
     # Track message ID
     if user_id not in user_messages:
@@ -4182,7 +4202,10 @@ async def handle_buttons(callback: types.CallbackQuery, state: FSMContext):
                 reply_markup=get_generation_error_keyboard()
             )
         else:
-            naming_msg = await callback.message.answer("What would you like to name this wallet? 8 letters max, only numbers and letters.")
+            naming_msg = await callback.message.answer(
+                "What would you like to name this wallet? 8 letters max, only numbers and letters.",
+                reply_markup=types.ForceReply(selective=True)
+            )
             
             # Track message ID
             if user_id not in user_messages:
