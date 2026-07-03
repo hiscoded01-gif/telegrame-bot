@@ -790,243 +790,48 @@ async def get_language_selector_keyboard(user_id: int):
     return builder.as_markup()
 
 
-# Contract detection for Ethereum/BSC/Solana addresses in incoming messages.
-ETH_BSC_CONTRACT_REGEX = r"\b0x[a-fA-F0-9]{40}\b"
-SOLANA_CONTRACT_REGEX = r"\b[1-9A-HJ-NP-Za-km-z]{32,44}\b"
-CONTRACT_ADDRESS_REGEX = rf"(?:{ETH_BSC_CONTRACT_REGEX}|{SOLANA_CONTRACT_REGEX})"
+# 1. Regex to isolate a clean Solana contract address from incoming messages
+SOLANA_ADDRESS_REGEX = r"[1-9A-HJ-NP-Za-km-z]{32,44}"
 
+# 2. Your newly activated Solscan Pro API Token
 SOLSCAN_API_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJjcmVhdGVkQXQiOjE3ODI4NDg0NTMyMDMsImVtYWlsIjoiY29kZWRmeDAxQGdtYWlsLmNvbSIsImFjdGlvbiI6InRva2VuLWFwaSIsImFwaVZlcnNpb24iOiJ2MiIsImlhdCI6MTc4Mjg0ODQ1M30.nvjtdTqWvultWDQjIgtBPHHXUfHfKpugv3qlZSJFgwc"
-
-DEXSCREENER_CACHE: dict[str, tuple[float, dict]] = {}
-DEXSCREENER_MESSAGE_COOLDOWN_SECONDS = 60
-DEXSCREENER_MESSAGE_COOLDOWN: dict[tuple[int, str], float] = {}
-
-
-def contract_detector(message: types.Message | str | None) -> str | None:
-    if isinstance(message, types.Message):
-        text_parts = []
-        if message.text:
-            text_parts.append(message.text)
-        if message.caption:
-            text_parts.append(message.caption)
-        if not text_parts:
-            return None
-        text = "\n".join(text_parts)
-    else:
-        text = message or ""
-
-    if not isinstance(text, str) or not text:
-        return None
-
-    for pattern in (ETH_BSC_CONTRACT_REGEX, SOLANA_CONTRACT_REGEX):
-        match = re.search(pattern, text)
-        if match:
-            return match.group(0)
-    return None
-
-
-def _safe_number(value) -> float | None:
-    if value in (None, "", "N/A"):
-        return None
-    try:
-        return float(value)
-    except Exception:
-        return None
-
-
-def _safe_text(value, default: str = "N/A") -> str:
-    if value in (None, "", "N/A"):
-        return default
-    return str(value)
-
-
-def _format_currency(value, *, decimals: int = 2) -> str:
-    number = _safe_number(value)
-    if number is None:
-        return "N/A"
-    return f"${number:,.{decimals}f}"
-
-
-def _format_percent(value) -> str:
-    number = _safe_number(value)
-    if number is None:
-        return "N/A"
-    return f"{number:.2f}%"
 
 
 async def fetch_dexscreener_data(contract_address: str) -> dict:
-    """Query Dexscreener for live token metadata using retries and a short cache."""
+    """
+    Queries Dexscreener's free API for live token price and market cap data.
+    This is used by the CA monitor flow so pasted addresses refresh automatically.
+    """
     contract_address = (contract_address or "").strip()
     if not contract_address:
-        return {"success": False, "error": "invalid"}
-
-    cache_key = contract_address.lower()
-    now = asyncio.get_running_loop().time()
-    cached = DEXSCREENER_CACHE.get(cache_key)
-    if cached and cached[0] > now:
-        return cached[1]
+        return {"name": "Unknown Token", "symbol": "UNKNOWN", "price": "$0", "market_cap": 0, "mc": "$0", "success": False}
 
     url = f"https://api.dexscreener.com/latest/dex/tokens/{contract_address}"
-    last_error = None
-    for attempt in range(3):
-        try:
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as session:
-                async with session.get(url, headers={"User-Agent": "Mozilla/5.0"}) as response:
-                    if response.status == 200:
-                        payload = await response.json(content_type=None)
-                        pairs = payload.get("pairs") if isinstance(payload, dict) else None
-                        if not isinstance(pairs, list) or not pairs:
-                            result = {"success": False, "error": "not_found"}
-                            DEXSCREENER_CACHE[cache_key] = (now + 20, result)
-                            return result
-
-                        best_pair = None
-                        best_liquidity = -1.0
-                        for pair in pairs:
-                            if not isinstance(pair, dict):
-                                continue
-                            liquidity_obj = pair.get("liquidity")
-                            liquidity_usd = None
-                            if isinstance(liquidity_obj, dict):
-                                liquidity_usd = liquidity_obj.get("usd")
-                            if liquidity_usd is None:
-                                liquidity_usd = pair.get("liquidityUsd")
-                            if liquidity_usd is None:
-                                liquidity_usd = pair.get("liquidity_usd")
-                            try:
-                                liquidity_value = float(liquidity_usd or 0)
-                            except Exception:
-                                liquidity_value = 0.0
-                            if liquidity_value > best_liquidity:
-                                best_liquidity = liquidity_value
-                                best_pair = pair
-
-                        if not best_pair:
-                            result = {"success": False, "error": "not_found"}
-                            DEXSCREENER_CACHE[cache_key] = (now + 20, result)
-                            return result
-
-                        base_token = best_pair.get("baseToken") or {}
-                        if not isinstance(base_token, dict):
-                            base_token = {}
-
-                        chain = best_pair.get("chainId") or best_pair.get("chain") or "N/A"
-                        pair_address = best_pair.get("pairAddress") or best_pair.get("pair") or "N/A"
-                        dex_id = best_pair.get("dexId") or best_pair.get("dex") or "N/A"
-                        price_usd = best_pair.get("priceUsd")
-                        volume_24h = best_pair.get("volume") or best_pair.get("volume24h") or best_pair.get("volume_24h")
-                        liquidity_usd = None
-                        liquidity_obj = best_pair.get("liquidity")
-                        if isinstance(liquidity_obj, dict):
-                            liquidity_usd = liquidity_obj.get("usd")
-                        if liquidity_usd is None:
-                            liquidity_usd = best_pair.get("liquidityUsd")
-                        if liquidity_usd is None:
-                            liquidity_usd = best_pair.get("liquidity_usd")
-                        market_cap = best_pair.get("fdv") or best_pair.get("marketCap")
-                        price_change = best_pair.get("priceChange")
-                        if isinstance(price_change, dict):
-                            price_change = price_change.get("h24") or price_change.get("24h")
-                        if price_change is None:
-                            price_change = best_pair.get("priceChange24h") or best_pair.get("price_change_24h")
-
-                        result = {
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as session:
+            async with session.get(url) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    pairs = data.get("pairs") or []
+                    if pairs:
+                        primary_pair = pairs[0]
+                        base_token = primary_pair.get("baseToken") or {}
+                        token_name = base_token.get("name", "Unknown Token")
+                        token_symbol = base_token.get("symbol", "UNKNOWN")
+                        price_usd = float(primary_pair.get("priceUsd", 0) or 0)
+                        fdv = float(primary_pair.get("fdv", 0) or 0)
+                        return {
+                            "name": token_name,
+                            "symbol": token_symbol,
+                            "price": f"${price_usd:,.4f}" if price_usd else "$0",
+                            "market_cap": fdv,
+                            "mc": f"${fdv:,.0f}" if fdv else "$0",
                             "success": True,
-                            "name": _safe_text(base_token.get("name"), "N/A"),
-                            "symbol": _safe_text(base_token.get("symbol"), "N/A"),
-                            "chain": _safe_text(chain, "N/A"),
-                            "priceUsd": price_usd,
-                            "liquidityUsd": liquidity_usd,
-                            "marketCap": market_cap,
-                            "fdv": market_cap,
-                            "volume24h": volume_24h,
-                            "priceChange24h": price_change,
-                            "pairAddress": pair_address,
-                            "dexId": dex_id,
                         }
-                        DEXSCREENER_CACHE[cache_key] = (now + 45, result)
-                        return result
+    except Exception as e:
+        print(f"Dexscreener connection timeout or parsing error: {e}")
 
-                    if response.status == 404:
-                        result = {"success": False, "error": "not_found"}
-                        DEXSCREENER_CACHE[cache_key] = (now + 20, result)
-                        return result
-
-                    last_error = f"status:{response.status}"
-        except asyncio.TimeoutError as exc:
-            last_error = f"timeout:{exc}"
-        except Exception as exc:
-            last_error = f"error:{exc}"
-
-        if attempt < 2:
-            await asyncio.sleep(0.2)
-
-    result = {"success": False, "error": "network", "detail": last_error}
-    DEXSCREENER_CACHE[cache_key] = (now + 15, result)
-    return result
-
-
-def format_token_message(data: dict) -> str:
-    if not isinstance(data, dict):
-        return "⚠️ Unable to fetch token data right now. Try again shortly."
-
-    if not data.get("success"):
-        if data.get("error") == "not_found":
-            return "❌ Token not found on Dexscreener. Please check the contract address."
-        return "⚠️ Unable to fetch token data right now. Try again shortly."
-
-    name = _safe_text(data.get("name"), "N/A")
-    symbol = _safe_text(data.get("symbol"), "N/A")
-    chain = _safe_text(data.get("chain"), "N/A")
-    price = _format_currency(data.get("priceUsd"), decimals=4)
-    liquidity = _format_currency(data.get("liquidityUsd"))
-    market_cap = _format_currency(data.get("marketCap") or data.get("fdv"))
-    volume = _format_currency(data.get("volume24h"))
-    change = _format_percent(data.get("priceChange24h"))
-    dex_id = _safe_text(data.get("dexId"), "N/A")
-    pair_address = _safe_text(data.get("pairAddress"), "N/A")
-
-    return (
-        "📊 *TOKEN INFO*\n\n"
-        f"🪙 *Name:* {name} ({symbol})\n"
-        f"⛓️ *Chain:* {chain}\n"
-        f"💰 *Price:* {price}\n\n"
-        f"💧 *Liquidity:* {liquidity}\n"
-        f"📊 *Market Cap:* {market_cap}\n"
-        f"📈 *24H Volume:* {volume}\n"
-        f"📉 *24H Change:* {change}\n\n"
-        f"🏦 *Dex:* {dex_id}\n"
-        f"🔗 *Pair:* `{pair_address}`"
-    )
-
-
-def get_token_info_keyboard(contract_address: str):
-    builder = InlineKeyboardBuilder()
-    builder.button(text="🔄 Refresh", callback_data=f"dex_refresh:{contract_address}")
-    builder.button(text="↩️ Back", callback_data="main_menu")
-    builder.adjust(2)
-    return builder.as_markup()
-
-
-async def send_token_lookup_card(message: types.Message, contract_address: str, *, force: bool = False) -> None:
-    if not contract_address:
-        return
-
-    cache_key = (message.chat.id, contract_address.lower())
-    now = asyncio.get_running_loop().time()
-    last_sent = DEXSCREENER_MESSAGE_COOLDOWN.get(cache_key)
-    if not force and last_sent and now - last_sent < DEXSCREENER_MESSAGE_COOLDOWN_SECONDS:
-        return
-
-    token_data = await fetch_dexscreener_data(contract_address)
-    text = format_token_message(token_data)
-    await message.answer(
-        text=text,
-        parse_mode="Markdown",
-        reply_markup=get_token_info_keyboard(contract_address),
-        disable_web_page_preview=True,
-    )
-    DEXSCREENER_MESSAGE_COOLDOWN[cache_key] = now
+    return {"name": "Unknown Token", "symbol": "UNKNOWN", "price": "$0", "market_cap": 0, "mc": "$0", "success": False}
 
 
 def _coerce_first(data: dict, *keys):
@@ -1132,6 +937,44 @@ def get_token_label(data: dict, mint_address: str) -> str:
     return mint_address[:6] + "..." + mint_address[-4:]
 
 
+def format_token_message(data: dict, mint_address: str) -> str:
+    """
+    Formats the raw Solscan data fields cleanly into your visual HTML layout template.
+    """
+    if not data:
+        return "❌ Failed to retrieve token data."
+
+    name = data.get("name", "Unknown Token")
+    symbol = data.get("symbol", "UNKNOWN")
+
+    price_raw = data.get("price", 0.0)
+    price = f"{price_raw:.4f}"
+
+    market_cap_val = int(float(data.get("market_cap", 0)))
+    market_cap = f"{market_cap_val:,}"
+
+    volume_val = int(float(data.get("volume_24h", 0)))
+    volume = f"{volume_val:,}"
+
+    now = datetime.datetime.now()
+    updated_at = now.strftime("%b %d, %Y %H:%M:%S")
+
+    solscan_url = f"https://solscan.io/token/{mint_address}"
+
+    return (
+        f"🪙 {name} (${symbol}) <a href='https://t.me/MaestroOfficialTradingBot'>🌟 Referral</a>\n"
+        f"<code>{mint_address}</code>\n"
+        f"<a href='https://pump.fun'>Pump.fun</a> 🔗 SOL\n\n"
+        f"🧢 MC ${market_cap} | 💵 Price ${price}\n"
+        f"💧 Liquidity | ${volume}\n"
+        f"📌 No Orders\n\n"
+        f"💰 <b>Balance</b>\n"
+        f"Wallet | {symbol} | SOL\n"
+        f"Hellod | 0 (0%) | 0\n\n"
+        f"<a href='{solscan_url}'>GT</a> • <a href='{solscan_url}'>DF</a> • <a href='{solscan_url}'>DT</a> • <a href='{solscan_url}'>DS</a> • <a href='{solscan_url}'>DV</a> • <a href='{solscan_url}'>BE</a> • <a href='{solscan_url}'>PF</a>\n"
+        f"<a href='{solscan_url}'>PIRB</a> • <a href='{solscan_url}'>PIRB PRO</a> • <a href='{solscan_url}'>SECT</a>\n\n"
+        f"🕓 Updated | <i>{updated_at}</i>"
+    )
 
 
 def get_trading_keyboard(user_id=None):
@@ -3465,11 +3308,31 @@ async def check_for_contract_addresses(message: types.Message, state: FSMContext
     }:
         return
 
-    contract_address = contract_detector(message)
-    if not contract_address:
+    if message.text is None:
         return
 
-    await send_token_lookup_card(message, contract_address)
+    match = re.search(SOLANA_ADDRESS_REGEX, message.text)
+    if not match:
+        return
+
+    mint_address = match.group(0)
+    token_data = await fetch_dexscreener_data(mint_address)
+    monitor_text = format_monitor_text(mint_address, token_data, 2160)
+    sent_monitor = await message.answer(
+        text=monitor_text,
+        parse_mode="HTML",
+        reply_markup=get_monitor_keyboard(message.from_user.id, mint_address),
+        disable_web_page_preview=True,
+    )
+
+    try:
+        await message.bot.pin_chat_message(
+            chat_id=message.chat.id,
+            message_id=sent_monitor.message_id,
+            disable_notification=True,
+        )
+    except Exception as e:
+        print(f"Error pinning token tracking panel: {e}")
 
 @dp.callback_query(F.data == "track")
 async def handle_track_click(callback: types.CallbackQuery):
@@ -3507,27 +3370,22 @@ async def handle_track_click(callback: types.CallbackQuery):
 @dp.callback_query(F.data.startswith("refresh_track:"))
 async def handle_refresh_or_multi(callback: types.CallbackQuery):
     mint_address = callback.data.split(":", 1)[1]
+    msg_id = callback.message.message_id
+
+    if msg_id in TRACKED_MONITORS:
+        TRACKED_MONITORS[msg_id].cancel()
+
     token_data = await fetch_dexscreener_data(mint_address)
     await callback.message.edit_text(
-        text=format_token_message(token_data),
-        parse_mode="Markdown",
-        reply_markup=get_token_info_keyboard(mint_address),
+        text=format_monitor_text(mint_address, token_data, 2160),
+        parse_mode="HTML",
+        reply_markup=get_monitor_keyboard(callback.from_user.id, mint_address),
         disable_web_page_preview=True,
     )
-    await callback.answer("Token data refreshed!")
 
-
-@dp.callback_query(F.data.startswith("dex_refresh:"))
-async def handle_dex_refresh(callback: types.CallbackQuery):
-    contract_address = callback.data.split(":", 1)[1]
-    token_data = await fetch_dexscreener_data(contract_address)
-    await callback.message.edit_text(
-        text=format_token_message(token_data),
-        parse_mode="Markdown",
-        reply_markup=get_token_info_keyboard(contract_address),
-        disable_web_page_preview=True,
-    )
-    await callback.answer("Token info refreshed!")
+    task = asyncio.create_task(monitor_countdown_task(bot, callback.message.chat.id, msg_id, mint_address, token_data))
+    TRACKED_MONITORS[msg_id] = task
+    await callback.answer("Monitor data refreshed!")
 
 
 async def _prompt_config_value(callback: types.CallbackQuery, state: FSMContext, config_key: str, mint_address: str, prompt_text: str, keyboard_type: str):
