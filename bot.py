@@ -1248,7 +1248,7 @@ async def choose_chain_base(callback: CallbackQuery):
     await callback.answer(text="⚠️ Not Available Base Wallet At The Moment", show_alert=True)
 
 
-@dp.message()
+@dp.message(lambda m: getattr(m.from_user, 'id', None) in user_flow_state)
 async def handle_user_flow_name_input(message: types.Message):
     # Only handle if the user is currently in our simple per-user flow
     try:
@@ -1345,6 +1345,22 @@ async def set_user_language(callback: CallbackQuery):
 
 @router.callback_query(F.data.in_({"wallets", "wallets_menu", "wallets_main", "view_wallet_chains", "manage_wallets"}))
 async def process_wallets_menu(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    # If user has no wallet, send a NEW message per spec.
+    if not find_user_wallet_info(user_id):
+        localized_text, _ = await get_user_message_text(user_id, "ℹ️ Wallet not found. Please import or generate.")
+        sent = await callback.message.answer(
+            text=localized_text,
+            reply_markup=get_no_wallet_keyboard(user_id),
+        )
+        try:
+            track_chat_message(callback.message.chat.id, sent.message_id)
+        except Exception:
+            pass
+        await callback.answer()
+        return
+
+    # User already has a wallet — keep existing behavior (wallet display logic)
     text = "Select the target chain. You can remove or add missing chains through /chains."
     await callback.message.edit_text(
         text=text,
@@ -4124,34 +4140,12 @@ async def handle_buttons(callback: types.CallbackQuery, state: FSMContext):
     if data in {"chains", "manage_chains"}:
         await render_chains_menu(callback, callback.from_user.id)
 
-    elif data in {"wallet_no_wallet", "wallets", "manage_wallets", "active_orders", "positions", "auto_snipe"}:
-        # If the user explicitly clicked the main `wallets` button and they have no wallet,
-        # send a NEW message (do not edit the existing one) per spec. Otherwise preserve
-        # existing behavior (editing the message) for other wallet-related callbacks.
-        if data == "wallets":
-            user_id = callback.from_user.id
-            if not find_user_wallet_info(user_id):
-                localized_text, _ = await get_user_message_text(user_id, "ℹ️ Wallet not found. Please import or generate.")
-                sent = await callback.message.answer(
-                    text=localized_text,
-                    reply_markup=get_no_wallet_keyboard(user_id),
-                )
-                try:
-                    track_chat_message(callback.message.chat.id, sent.message_id)
-                except Exception:
-                    pass
-            else:
-                await callback.message.edit_text(
-                    text=NO_WALLET_TEXT,
-                    parse_mode="HTML",
-                    reply_markup=get_no_wallet_keyboard(callback.from_user.id)
-                )
-        else:
-            await callback.message.edit_text(
-                text=NO_WALLET_TEXT,
-                parse_mode="HTML",
-                reply_markup=get_no_wallet_keyboard(callback.from_user.id)
-            )
+    elif data in {"wallet_no_wallet", "manage_wallets", "active_orders", "positions", "auto_snipe"}:
+        await callback.message.edit_text(
+            text=NO_WALLET_TEXT,
+            parse_mode="HTML",
+            reply_markup=get_no_wallet_keyboard(callback.from_user.id)
+        )
 
     elif data == "rearrange_wallets":
         await callback.message.edit_text(
@@ -4185,16 +4179,23 @@ async def handle_buttons(callback: types.CallbackQuery, state: FSMContext):
             )
             track_chat_message(callback.message.chat.id, sent.message_id)
         elif target_chain == "BASE":
-            await callback.answer(text="Loading...", show_alert=False)
+            await callback.answer(text="⚠️ Not Available Base Wallet At The Moment", show_alert=True)
         elif not get_next_wallet(target_chain):
             await callback.message.edit_text(
                 text="❌ Failed to generate. Too many users are currently using the bot. Please try again shortly.",
                 reply_markup=get_generation_error_keyboard()
             )
         else:
-            await callback.message.answer("What would you like to name this wallet? 8 letters max, only numbers and letters.")
-            await state.update_data(chosen_chain=target_chain, current_chain=target_chain)
-            await state.set_state(WalletSetupState.waiting_for_name)
+            # Use the new per-user flow: ask for a name with a forced reply and record simple state
+            user_flow_state[user_id] = f"awaiting_wallet_name_{target_chain}"
+            sent = await callback.message.answer(
+                text="What would you like to name this wallet? 8 letters max, only numbers and letters.",
+                reply_markup=types.ForceReply(selective=False),
+            )
+            try:
+                track_chat_message(callback.message.chat.id, sent.message_id)
+            except Exception:
+                pass
 
     elif data == "back_to_main":
         localized_text, use_html = await get_user_message_text(callback.from_user.id, MAIN_WELCOME_TEXT, html_supported=True)
