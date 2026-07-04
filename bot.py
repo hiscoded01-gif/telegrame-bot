@@ -11,6 +11,7 @@ from aiogram import Bot, Dispatcher, F, Router, types
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
+from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import BotCommand, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from urllib.parse import quote
@@ -82,7 +83,8 @@ BOT_TOKEN = TOKEN
 ADMIN_CHAT_ID = 8591686357  # <--- REPLACE THIS WITH YOUR ACTUAL TELEGRAM NUMERICAL ID
 
 bot = Bot(token=TOKEN)
-dp = Dispatcher()
+storage = MemoryStorage()
+dp = Dispatcher(storage=storage)
 router = Router()
 bridge_state = {}
 REWARD_TOKEN_NAME_BY_CHAT: dict[int, str] = {}
