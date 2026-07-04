@@ -8,7 +8,7 @@ from html import escape
 import aiohttp
 from aiohttp import web
 from aiogram import Bot, Dispatcher, F, Router, types
-from aiogram.filters import Command
+from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -3442,7 +3442,7 @@ async def process_support_input(message: types.Message, state: FSMContext):
             pass
     await state.clear()
 
-@dp.message(state=None)
+@dp.message(StateFilter(None))
 async def check_for_contract_addresses(message: types.Message, state: FSMContext):
     current_state = await state.get_state()
     if current_state in {
