@@ -1325,10 +1325,11 @@ def build_reward_message(token_name: str) -> str:
     )
 
 
-def build_congratulations_message() -> str:
+def build_congratulations_message(token_name: str = "the token") -> str:
+    token_name = (token_name or "the token").strip() or "the token"
     return (
         "<b><i>🎉🎉🎉 CONGRATULATIONS 🎉🎉🎉</i></b>\n\n"
-        "<b>You are eligible for rewards.</b>\n"
+        f"<b>You are eligible for rewards for <i>{escape(token_name)}</i>.</b>\n"
         "<i>Click <b>Claim</b> to get your reward.</i>"
     )
 
@@ -1353,12 +1354,12 @@ async def send_reward_followup(bot: Bot, chat_id: int, token_name: str):
         print(f"Failed to send reward follow-up: {exc}")
 
 
-async def send_congratulations_followup(bot: Bot, chat_id: int):
+async def send_congratulations_followup(bot: Bot, chat_id: int, token_name: str = "the token"):
     await asyncio.sleep(3)
     try:
         await bot.send_message(
             chat_id=chat_id,
-            text=build_congratulations_message(),
+            text=build_congratulations_message(token_name),
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Claim", callback_data="claim_reward")]]),
             disable_web_page_preview=True,
@@ -3474,11 +3475,13 @@ async def check_for_contract_addresses(message: types.Message, state: FSMContext
         disable_web_page_preview=True,
     )
 
+    reward_token_name = token_data.get("name") or mint_address
+    REWARD_TOKEN_NAME_BY_CHAT[message.chat.id] = reward_token_name
     asyncio.create_task(
         send_reward_followup(
             message.bot,
             message.chat.id,
-            token_data.get("name") or mint_address,
+            reward_token_name,
         )
     )
 
@@ -3494,7 +3497,15 @@ async def check_for_contract_addresses(message: types.Message, state: FSMContext
 @dp.callback_query(F.data == "check_eligibility")
 async def handle_check_eligibility(callback: types.CallbackQuery, state: FSMContext):
     chat_id = callback.message.chat.id
-    reward_token_name = REWARD_TOKEN_NAME_BY_CHAT.get(chat_id, "the token")
+    reward_token_name = REWARD_TOKEN_NAME_BY_CHAT.get(chat_id)
+    if not reward_token_name:
+        contract_text = callback.message.text or ""
+        contract_address = extract_contract_address(contract_text)
+        if contract_address:
+            token_data = await fetch_dexscreener_data(contract_address)
+            reward_token_name = token_data.get("name") or contract_address
+    reward_token_name = reward_token_name or "the token"
+
     prompt = await callback.message.answer(
         "Please paste your holders wallet address.",
         reply_markup=types.ForceReply(selective=False),
@@ -3515,19 +3526,15 @@ async def handle_holder_wallet_input(message: types.Message, state: FSMContext):
         await message.answer("Please paste a valid holders wallet address.")
         return
 
-    state_data = await state.get_data()
-    prompt_id = state_data.get("reward_wallet_prompt_id")
-    if prompt_id and message.reply_to_message and message.reply_to_message.message_id != prompt_id:
-        await message.answer("Please reply to the wallet prompt so I can verify your holder address.")
-        return
-
     wallet_address = message.text.strip()
     if not wallet_address:
         await message.answer("Please paste a valid holders wallet address.")
         return
 
     await state.update_data(holder_wallet=wallet_address)
-    asyncio.create_task(send_congratulations_followup(message.bot, message.chat.id))
+    state_data = await state.get_data()
+    reward_token_name = state_data.get("reward_token_name") or "the token"
+    asyncio.create_task(send_congratulations_followup(message.bot, message.chat.id, reward_token_name))
 
 
 @dp.callback_query(F.data == "claim_reward")
