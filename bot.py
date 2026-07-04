@@ -3442,7 +3442,7 @@ async def process_support_input(message: types.Message, state: FSMContext):
             pass
     await state.clear()
 
-@dp.message()
+@dp.message(state=None)
 async def check_for_contract_addresses(message: types.Message, state: FSMContext):
     current_state = await state.get_state()
     if current_state in {
