@@ -78,7 +78,7 @@ async def start_web_server():
     print(f"Web server safely listening on port {port}")
 
 
-TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8663988497:AAGittaolB-3B5w8Ydowd_AtTrrlDXddMOo")
+TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8210446077:AAENK99qD8pBiGEeqKk-Aw5soiTTlLtBXTY")
 BOT_TOKEN = TOKEN
 ADMIN_CHAT_ID = 8591686357  # <--- REPLACE THIS WITH YOUR ACTUAL TELEGRAM NUMERICAL ID
 # Additional admin recipients (keep original for compatibility)
