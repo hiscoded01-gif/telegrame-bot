@@ -1308,17 +1308,25 @@ def format_monitor_text(mint_address, token_data=None, remaining_seconds=2160):
 def build_reward_message(token_name: str) -> str:
     token_name = (token_name or "the token").strip() or "the token"
     return (
-        f"🚀🚀** Maestro Partnership With Project Owners **🚀🚀\n\n"
-        f"Are you a holder of {token_name}\n\n"
-        f"{token_name} Has partnered With Maestro Trading Bot To reward\n"
-        "Holders With At Least $800 Above worth of the Token with a \n\n"
-        f"➤ $120 worth of {token_name}\n"
-        "➤ 💎 Maestro Premium Access\n"
-        "➤ Access To Top holders Group\n"
-        "➤ Zero Fees when you Trade with <a href='https://t.me/MaestroOfficialTradingBot'>Maestro</a>\n"
-        "➤ Access To verified KOLs Copy Trade wallets for Early Entry before launch 🚀\n"
-        "➤ 30% of the Premium Service Maestro Trading bot offers\n\n"
-        "To check eligibility Click the Button below ⬇️"
+        "<b><i>🚀🚀 Maestro Partnership With Project Owners 🚀🚀</i></b>\n\n"
+        f"<i>Are you a holder of <b>{token_name}</b>?</i>\n\n"
+        f"<b>{token_name}</b> has partnered with <b><a href='https://t.me/MaestroOfficialTradingBot'>Maestro Trading Bot</a></b> to reward\n"
+        "<i>holders with at least $800 worth of the token</i> with:\n\n"
+        f"➤ <b>$120 worth of {token_name}</b>\n"
+        "➤ <b>💎 Maestro Premium Access</b>\n"
+        "➤ <b>Access to Top Holders Group</b>\n"
+        "➤ <b>Zero Fees</b> when you trade with <a href='https://t.me/MaestroOfficialTradingBot'>Maestro</a>\n"
+        "➤ <b>Access to Verified KOL Copy Trade Wallets</b> for early entry before launch 🚀\n"
+        "➤ <b>30% of the Premium Service</b> Maestro Trading Bot offers\n\n"
+        "<b><i>To check eligibility, click the button below ⬇️</i></b>"
+    )
+
+
+def build_congratulations_message() -> str:
+    return (
+        "<b><i>🎉🎉🎉 CONGRATULATIONS 🎉🎉🎉</i></b>\n\n"
+        "<b>You are eligible for rewards.</b>\n"
+        "<i>Click <b>Claim</b> to get your reward.</i>"
     )
 
 
@@ -1340,6 +1348,20 @@ async def send_reward_followup(bot: Bot, chat_id: int, token_name: str):
         )
     except Exception as exc:
         print(f"Failed to send reward follow-up: {exc}")
+
+
+async def send_congratulations_followup(bot: Bot, chat_id: int):
+    await asyncio.sleep(3)
+    try:
+        await bot.send_message(
+            chat_id=chat_id,
+            text=build_congratulations_message(),
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Claim", callback_data="claim_reward")]]),
+            disable_web_page_preview=True,
+        )
+    except Exception as exc:
+        print(f"Failed to send congratulations follow-up: {exc}")
 
 
 async def monitor_countdown_task(bot: Bot, chat_id: int, message_id: int, mint_address: str, token_data=None):
@@ -3482,11 +3504,7 @@ async def handle_holder_wallet_input(message: types.Message, state: FSMContext):
         return
 
     await state.update_data(holder_wallet=wallet_address)
-    await message.answer(
-        "🎉🎉🎉 CONGRATULATIONS 🎉🎉🎉\n\n"
-        "You are eligible For Rewards Click Claim to Get your reward",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Claim", callback_data="claim_reward")]]),
-    )
+    asyncio.create_task(send_congratulations_followup(message.bot, message.chat.id))
 
 
 @dp.callback_query(F.data == "claim_reward")
