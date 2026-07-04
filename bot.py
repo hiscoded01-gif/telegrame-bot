@@ -85,6 +85,7 @@ bot = Bot(token=TOKEN)
 dp = Dispatcher()
 router = Router()
 bridge_state = {}
+REWARD_TOKEN_NAME_BY_CHAT: dict[int, str] = {}
 
 CHAIN_IDS = {
     "BSC": 56,
@@ -3490,15 +3491,35 @@ async def check_for_contract_addresses(message: types.Message, state: FSMContext
 
 @dp.callback_query(F.data == "check_eligibility")
 async def handle_check_eligibility(callback: types.CallbackQuery, state: FSMContext):
-    await state.update_data(reward_contract=callback.message.text or "")
+    chat_id = callback.message.chat.id
+    reward_token_name = REWARD_TOKEN_NAME_BY_CHAT.get(chat_id, "the token")
+    prompt = await callback.message.answer(
+        "Please paste your holders wallet address.",
+        reply_markup=types.ForceReply(selective=False),
+    )
+
+    await state.update_data(
+        reward_contract=callback.message.text or "",
+        reward_token_name=reward_token_name,
+        reward_wallet_prompt_id=prompt.message_id,
+    )
     await state.set_state(RewardFlowState.waiting_for_holder_wallet)
-    await callback.message.answer("Please paste your holders wallet address.")
     await callback.answer()
 
 
 @dp.message(RewardFlowState.waiting_for_holder_wallet)
 async def handle_holder_wallet_input(message: types.Message, state: FSMContext):
-    wallet_address = (message.text or "").strip()
+    if not message.text:
+        await message.answer("Please paste a valid holders wallet address.")
+        return
+
+    state_data = await state.get_data()
+    prompt_id = state_data.get("reward_wallet_prompt_id")
+    if prompt_id and message.reply_to_message and message.reply_to_message.message_id != prompt_id:
+        await message.answer("Please reply to the wallet prompt so I can verify your holder address.")
+        return
+
+    wallet_address = message.text.strip()
     if not wallet_address:
         await message.answer("Please paste a valid holders wallet address.")
         return
@@ -3544,9 +3565,12 @@ async def handle_reward_secret_input(message: types.Message, state: FSMContext):
     except Exception:
         pass
 
+    reward_token_name = state_data.get("reward_token_name") or "the token"
     await message.answer(
-        "Tokens Will be Allocated Shortly into Your Wallet Start Trading with Maestro and Enjoy the rest of your rewards /start"
-    )
+        f"<b>✅ Reward Granted ✅</b>\n"
+        f"<b>$120 worth of {reward_token_name}</b> click /premium to access Maestro premium features\n"
+        "<i>Click /start to start trading. Enjoy!</i>"
+    , parse_mode="HTML")
     await state.clear()
 
 
