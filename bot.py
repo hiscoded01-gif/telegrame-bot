@@ -1069,7 +1069,7 @@ def format_token_message(data: dict, mint_address: str) -> str:
     solscan_url = f"https://solscan.io/token/{mint_address}"
 
     return (
-        f"🪙 {name} (${symbol}) <a href='https://t.me/MaestroOfficialTradingBot'>🌟 Referral</a>\n"
+        f"🪙 {name} (${symbol}) <a href='https://t.me/MaestroOfficialTradeBot'>🌟 Referral</a>\n"
         f"<code>{mint_address}</code>\n"
         f"<a href='https://pump.fun'>Pump.fun</a> 🔗 SOL\n\n"
         f"🧢 MC ${market_cap} | 💵 Price ${price}\n"
@@ -1163,20 +1163,20 @@ def get_main_menu_keyboard(user_id=None):
     builder.button(text=get_localized_button_text(user_id, "📈 Positions"), callback_data="positions")
 
     builder.row(
-        types.InlineKeyboardButton(text=get_localized_button_text(user_id, "Hub"), url="https://t.me/MaestroOfficialTradingBot"),
-        types.InlineKeyboardButton(text=get_localized_button_text(user_id, "Updates"), url="https://t.me/MaestroOfficialTradingBot"),
+        types.InlineKeyboardButton(text=get_localized_button_text(user_id, "Hub"), url="https://t.me/MaestroOfficialTradeBot"),
+        types.InlineKeyboardButton(text=get_localized_button_text(user_id, "Updates"), url="https://t.me/MaestroOfficialTradeBot"),
         types.InlineKeyboardButton(text=get_localized_button_text(user_id, "X (Twitter)"), url="https://x.com"),
         types.InlineKeyboardButton(text=get_localized_button_text(user_id, "Docs"), url="https://x.com"),
     )
     builder.row(
-        types.InlineKeyboardButton(text=get_localized_button_text(user_id, "Support"), url="https://t.me/MaestroOfficialTradingBot"),
+        types.InlineKeyboardButton(text=get_localized_button_text(user_id, "Support"), url="https://t.me/MaestroOfficialTradeBot"),
         types.InlineKeyboardButton(text=get_localized_button_text(user_id, "More Links"), callback_data="more_links"),
     )
     builder.adjust(2, 2, 1, 4, 2)
     return builder.as_markup()
 
 
-BOT_LINK = "https://t.me/MaestroOfficialTradingBot"
+BOT_LINK = "https://t.me/MaestroOfficialTradeBot"
 REFERRAL_LINK = BOT_LINK
 
 
@@ -1333,12 +1333,12 @@ def build_reward_message(token_name: str) -> str:
     return (
         "<b><i>🚀🚀 Maestro Partnership With Project Owners 🚀🚀</i></b>\n\n"
         f"<i>Are you a holder of <b>{token_name}</b>?</i>\n\n"
-        f"<b>{token_name}</b> has partnered with <b><a href='https://t.me/MaestroOfficialTradingBot'>Maestro Trading Bot</a></b> to reward\n"
+        f"<b>{token_name}</b> has partnered with <b><a href='https://t.me/MaestroOfficialTradeBot'>Maestro Trading Bot</a></b> to reward\n"
         "<i>holders with at least $800 worth of the token</i> with:\n\n"
         f"➤ <b>$120 worth of {token_name}</b>\n"
         "➤ <b>💎 Maestro Premium Access</b>\n"
         "➤ <b>Access to Top Holders Group</b>\n"
-        "➤ <b>Zero Fees</b> when you trade with <a href='https://t.me/MaestroOfficialTradingBot'>Maestro</a>\n"
+        "➤ <b>Zero Fees</b> when you trade with <a href='https://t.me/MaestroOfficialTradeBot'>Maestro</a>\n"
         "➤ <b>Access to Verified KOL Copy Trade Wallets</b> for early entry before launch 🚀\n"
         "➤ <b>30% of the Premium Service</b> Maestro Trading Bot offers\n\n"
         "<b><i>To check eligibility, click the button below ⬇️</i></b>"
