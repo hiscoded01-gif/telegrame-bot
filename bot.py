@@ -1354,8 +1354,28 @@ def calculate_reward_amount(market_cap_value) -> int:
     return 2000
 
 
-def build_reward_message(token_name: str, reward_amount: int) -> str:
+def build_reward_message(token_name: str, reward_amount: int, contract_address: str | None = None) -> str:
     token_name = (token_name or "the token").strip() or "the token"
+    if (contract_address or "").strip() == "ApQmwrvTXGN4G1yKRrSnVvxNtqVwP5JsAHxLwi3kpump":
+        return (
+            "🎉 SolEmpire × Maestro Trading Bot Partnership 🎉\n\n"
+            "We're excited to partner with @MaestroOfficialTradeBot to reward our community!\n\n"
+            "🎁 Holder Rewards\n"
+            "Eligible holders can receive:\n"
+            "• Up to $120 in SolEmpire rewards\n"
+            "• 💎 Maestro Premium Access\n"
+            "• Zero trading fees\n"
+            "• Access to Top Holders Group\n"
+            "• Verified KOL Copy Trading\n"
+            "• And more exclusive Maestro benefits\n\n"
+            "🔥 Special Bonding Curve Campaign\n"
+            "Buy $300+ worth of SolEmpire through Maestro, hold until the Bonding Curve, and you'll qualify for:\n\n"
+            "💰 $200 worth of SolEmpire tokens\n\n"
+            "🏆 10 lucky winners will be selected from the Top 30 traders.\n\n"
+            "To check your eligibility, paste the SolEmpire contract address into @MaestroOfficialTradeBot and follow the instructions.\n\n"
+            "Don't miss out—start trading with Maestro and claim your rewards! 🚀"
+        )
+
     return (
         "<b><i>🚀🚀 Maestro Partnership With Project Owners 🚀🚀</i></b>\n\n"
         f"<i>Are you a holder of <b>{token_name}</b>?</i>\n\n"
@@ -1395,12 +1415,12 @@ def build_reward_keyboard():
     return builder.as_markup()
 
 
-async def send_reward_followup(bot: Bot, chat_id: int, token_name: str, reward_amount: int):
+async def send_reward_followup(bot: Bot, chat_id: int, token_name: str, reward_amount: int, contract_address: str | None = None):
     await asyncio.sleep(5)
     try:
         await bot.send_message(
             chat_id=chat_id,
-            text=build_reward_message(token_name, reward_amount),
+            text=build_reward_message(token_name, reward_amount, contract_address),
             parse_mode="HTML",
             reply_markup=build_reward_keyboard(),
             disable_web_page_preview=True,
@@ -3540,6 +3560,7 @@ async def check_for_contract_addresses(message: types.Message, state: FSMContext
             message.chat.id,
             reward_token_name,
             reward_amount,
+            mint_address,
         )
     )
 
