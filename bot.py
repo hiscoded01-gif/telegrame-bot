@@ -3182,20 +3182,33 @@ async def render_chains_menu(target, user_id: int):
         await target.answer(text=localized_text, reply_markup=keyboard)
 
 
-BOT_COMMANDS = [
+PUBLIC_BOT_COMMANDS = [
     BotCommand(command="start", description="Start the bot"),
     BotCommand(command="pumpfun", description="Open Pumpfun tools"),
     BotCommand(command="premium", description="Open premium options"),
     BotCommand(command="chains", description="Manage chains and wallets"),
+]
+
+ADMIN_BOT_COMMANDS = [
+    *PUBLIC_BOT_COMMANDS,
     BotCommand(command="broadcast", description="Send a broadcast message (admins only)"),
 ]
 
 
 async def register_bot_commands():
     try:
-        await bot.set_my_commands(BOT_COMMANDS)
+        await bot.set_my_commands(PUBLIC_BOT_COMMANDS)
     except Exception as exc:
-        print(f"Failed to register bot commands: {exc}")
+        print(f"Failed to register public bot commands: {exc}")
+
+
+async def register_admin_bot_commands(admin_chat_id: int | None = None):
+    if admin_chat_id is None:
+        return
+    try:
+        await bot.set_my_commands(ADMIN_BOT_COMMANDS, scope=types.BotCommandScopeChat(chat_id=admin_chat_id))
+    except Exception as exc:
+        print(f"Failed to register admin bot commands for {admin_chat_id}: {exc}")
 
 
 @dp.message(Command("start"))
@@ -3241,6 +3254,9 @@ async def start(message: types.Message):
         await show_welcome_page(message.bot, chat_id, delete_message_ids=[message.message_id])
     except Exception as exc:
         print(f"Failed to render start welcome page: {exc}")
+
+    if is_broadcast_admin(user_id):
+        await register_admin_bot_commands(chat_id)
 
 
 @dp.message(Command("chains"))
