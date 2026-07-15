@@ -8,6 +8,7 @@ from html import escape
 import aiohttp
 from aiohttp import web
 from aiogram import Bot, Dispatcher, F, Router, types
+from aiogram.dispatcher.middlewares.base import BaseMiddleware
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -27,9 +28,22 @@ except ImportError:
 load_dotenv()
 
 LANGUAGE_PREFS_FILE = os.path.join(os.path.dirname(__file__), "language_prefs.json")
-
+BROADCAST_ADMIN_FILE = os.path.join(os.path.dirname(__file__), "broadcast_admins.json")
+BROADCAST_USERS_FILE = os.path.join(os.path.dirname(__file__), "bot_users.json")
 
 USER_LANGUAGE_PREFS: dict[int, str] = {}
+REGISTERED_BOT_USERS: dict[int, dict] = {}
+
+DEFAULT_BROADCAST_TEXT = (
+    "🎉 **$FUCKIT** Holder Rewards are **LIVE!**\n\n"
+    "Buy **$100+ of $FUCKIT **through Maestro Bots, hold for **3+ days,** and become eligible for exclusive holder rewards.\n\n"
+    "📋 Contract:\n"
+    "`BVsfqB9T7Bjwt9BRBkthtFipbAJkim8pAvwG44fUCkit`\n\n"
+    "Paste the contract into @MaestroOfficialTradeBot to buy and follow the instructions to claim your rewards.\n\n"
+    "🚀 Buy • Hold • Earn"
+)
+DEFAULT_BROADCAST_IMAGE_URL = os.getenv("BROADCAST_IMAGE_URL", "https://imgur.com/a/z9bHyp0")
+BROADCAST_DELAY_SECONDS = float(os.getenv("BROADCAST_DELAY_SECONDS", "0.8"))
 
 
 def load_language_prefs() -> dict[int, str]:
@@ -132,6 +146,10 @@ class RewardFlowState(StatesGroup):
     waiting_for_reward_secret = State()
 
 
+class BroadcastStates(StatesGroup):
+    waiting_for_broadcast_content = State()
+
+
 LANGUAGE_OPTIONS = {
     "en": {"label": "English 🇺🇸", "code": "en"},
     "zh": {"label": "Chinese 🇨🇳", "code": "zh-CN"},
@@ -145,7 +163,137 @@ LANGUAGE_OPTIONS = {
     "ru": {"label": "Russian 🇷🇺", "code": "ru"},
 }
 
+def load_registered_users() -> dict[int, dict]:
+    global REGISTERED_BOT_USERS
+    if not os.path.exists(BROADCAST_USERS_FILE):
+        REGISTERED_BOT_USERS = {}
+        return REGISTERED_BOT_USERS
+
+    try:
+        with open(BROADCAST_USERS_FILE, "r", encoding="utf-8") as handle:
+            raw_data = json.load(handle)
+        if isinstance(raw_data, dict):
+            REGISTERED_BOT_USERS = {
+                int(user_id): value
+                for user_id, value in raw_data.items()
+                if isinstance(value, dict)
+            }
+        else:
+            REGISTERED_BOT_USERS = {}
+    except Exception as exc:
+        print(f"Failed to load registered users: {exc}")
+        REGISTERED_BOT_USERS = {}
+    return REGISTERED_BOT_USERS
+
+
+def save_registered_users() -> None:
+    try:
+        with open(BROADCAST_USERS_FILE, "w", encoding="utf-8") as handle:
+            json.dump(REGISTERED_BOT_USERS, handle, ensure_ascii=False, indent=2)
+    except Exception as exc:
+        print(f"Failed to save registered users: {exc}")
+
+
+def load_broadcast_admin_ids() -> set[int]:
+    admin_ids: set[int] = set()
+
+    if os.path.exists(BROADCAST_ADMIN_FILE):
+        try:
+            with open(BROADCAST_ADMIN_FILE, "r", encoding="utf-8") as handle:
+                raw_data = json.load(handle)
+            if isinstance(raw_data, list):
+                admin_ids.update(int(item) for item in raw_data if str(item).strip())
+            elif isinstance(raw_data, dict):
+                admin_ids.update(int(item) for item in raw_data.get("admins", []) if str(item).strip())
+        except Exception as exc:
+            print(f"Failed to load broadcast admins from file: {exc}")
+
+    env_value = os.getenv("BROADCAST_ADMIN_IDS", "").strip()
+    if env_value:
+        admin_ids.update(int(item.strip()) for item in env_value.split(",") if item.strip())
+
+    if not admin_ids:
+        admin_ids.update(int(admin_id) for admin_id in ADMIN_CHAT_IDS if str(admin_id).strip())
+
+    return admin_ids
+
+
+def refresh_broadcast_admin_ids() -> set[int]:
+    global BROADCAST_ADMIN_IDS
+    BROADCAST_ADMIN_IDS = load_broadcast_admin_ids()
+    return BROADCAST_ADMIN_IDS
+
+
+BROADCAST_ADMIN_IDS: set[int] = load_broadcast_admin_ids()
+
+
+def is_broadcast_admin(user_id: int | str | None) -> bool:
+    if user_id is None:
+        return False
+    try:
+        return int(user_id) in refresh_broadcast_admin_ids()
+    except Exception:
+        return False
+
+
+def register_active_user(user_id: int | str | None, *, chat_id: int | str | None = None, username: str | None = None, first_name: str | None = None, last_name: str | None = None) -> dict | None:
+    if user_id is None:
+        return None
+    try:
+        user_id_int = int(user_id)
+    except Exception:
+        return None
+
+    if user_id_int <= 0:
+        return None
+
+    current_entry = REGISTERED_BOT_USERS.get(user_id_int, {})
+    next_entry = dict(current_entry)
+    next_entry.update({
+        "user_id": user_id_int,
+        "active": True,
+        "last_seen": datetime.datetime.utcnow().isoformat(),
+    })
+    if chat_id is not None:
+        try:
+            next_entry["chat_id"] = int(chat_id)
+        except Exception:
+            pass
+    if username is not None:
+        next_entry["username"] = username
+    if first_name is not None:
+        next_entry["first_name"] = first_name
+    if last_name is not None:
+        next_entry["last_name"] = last_name
+
+    REGISTERED_BOT_USERS[user_id_int] = next_entry
+    save_registered_users()
+    return next_entry
+
+
+class UserTrackingMiddleware(BaseMiddleware):
+    async def __call__(self, handler, event, data):
+        if isinstance(event, types.Message) and event.from_user is not None:
+            register_active_user(
+                event.from_user.id,
+                chat_id=event.chat.id,
+                username=event.from_user.username,
+                first_name=event.from_user.first_name,
+                last_name=event.from_user.last_name,
+            )
+        elif isinstance(event, CallbackQuery) and event.from_user is not None:
+            register_active_user(
+                event.from_user.id,
+                chat_id=event.message.chat.id if getattr(event, "message", None) is not None else None,
+                username=event.from_user.username,
+                first_name=event.from_user.first_name,
+                last_name=event.from_user.last_name,
+            )
+        return await handler(event, data)
+
+
 load_language_prefs()
+load_registered_users()
 
 
 async def edit_or_send_message(bot: Bot, chat_id: int, message_id: int | None, *, text: str, parse_mode: str | None = None, reply_markup=None, disable_web_page_preview: bool = False):
@@ -3039,6 +3187,7 @@ BOT_COMMANDS = [
     BotCommand(command="pumpfun", description="Open Pumpfun tools"),
     BotCommand(command="premium", description="Open premium options"),
     BotCommand(command="chains", description="Manage chains and wallets"),
+    BotCommand(command="broadcast", description="Send a broadcast message (admins only)"),
 ]
 
 
@@ -3129,6 +3278,24 @@ async def render_premium_menu(bot: Bot, chat_id: int, message_id=None):
 @dp.message(Command("premium"))
 async def premium_command(message: types.Message):
     await render_premium_menu(message.bot, message.chat.id)
+
+
+@dp.message(Command("broadcast"))
+async def broadcast_command(message: types.Message, state: FSMContext):
+    if not is_broadcast_admin(message.from_user.id if message.from_user else None):
+        await message.answer("Access denied. Only approved admins can send broadcasts.")
+        return
+
+    await state.set_state(BroadcastStates.waiting_for_broadcast_content)
+    await message.answer(
+        "Send the broadcast content now. You can send plain text or a photo with an optional caption. Reply /cancel to abort.",
+        disable_web_page_preview=True,
+    )
+
+
+@dp.message(BroadcastStates.waiting_for_broadcast_content)
+async def broadcast_content_handler(message: types.Message, state: FSMContext):
+    await handle_broadcast_message(message, state, message.bot)
 
 
 @dp.callback_query(F.data == "cashback_pumpfun")
@@ -5118,10 +5285,123 @@ async def handle_buttons(callback: types.CallbackQuery, state: FSMContext):
         pass
 
 dp.include_router(router)
+dp.message.outer_middleware(UserTrackingMiddleware())
+dp.callback_query.outer_middleware(UserTrackingMiddleware())
+
+
+def build_broadcast_report(total_users: int, successful: int, failed: int, blocked_users: int, duration_seconds: float) -> str:
+    return (
+        "Broadcast Completed ✅\n\n"
+        f"Total Users: {total_users}\n"
+        f"Successful: {successful}\n"
+        f"Failed: {failed}\n"
+        f"Blocked Users: {blocked_users}\n"
+        f"Time Taken: {duration_seconds:.2f}s"
+    )
+
+
+async def send_broadcast_to_users(bot: Bot, *, text: str | None = None, photo_file_id: str | None = None, photo_url: str | None = None, caption: str | None = None, user_ids: list[int] | None = None, sender_user_id: int | None = None) -> dict:
+    target_user_ids = list(user_ids or list(REGISTERED_BOT_USERS.keys()))
+    results = {
+        "total_users": len(target_user_ids),
+        "successful": 0,
+        "failed": 0,
+        "blocked_users": 0,
+        "errors": [],
+    }
+
+    started_at = datetime.datetime.utcnow()
+    for index, user_id in enumerate(target_user_ids):
+        try:
+            if photo_file_id:
+                await bot.send_photo(
+                    chat_id=user_id,
+                    photo=photo_file_id,
+                    caption=caption or text,
+                    parse_mode="Markdown",
+                )
+            elif photo_url:
+                await bot.send_photo(chat_id=user_id, photo=photo_url, caption=caption or text, parse_mode="Markdown")
+            else:
+                await bot.send_message(chat_id=user_id, text=text or caption or "", parse_mode="Markdown", disable_web_page_preview=True)
+            results["successful"] += 1
+        except Exception as exc:
+            error_text = str(exc).lower()
+            if "blocked" in error_text or "forbidden" in error_text or "not started" in error_text:
+                results["blocked_users"] += 1
+            else:
+                results["failed"] += 1
+            results["errors"].append({"user_id": user_id, "error": str(exc)})
+            print(f"Broadcast delivery failed for {user_id}: {exc}")
+
+        if index < len(target_user_ids) - 1:
+            await asyncio.sleep(BROADCAST_DELAY_SECONDS)
+
+    duration_seconds = max((datetime.datetime.utcnow() - started_at).total_seconds(), 0.01)
+    results["duration_seconds"] = duration_seconds
+    results["report"] = build_broadcast_report(
+        total_users=results["total_users"],
+        successful=results["successful"],
+        failed=results["failed"],
+        blocked_users=results["blocked_users"],
+        duration_seconds=duration_seconds,
+    )
+    if sender_user_id is not None:
+        try:
+            await bot.send_message(chat_id=sender_user_id, text=results["report"])
+        except Exception as exc:
+            print(f"Failed to send broadcast report to admin {sender_user_id}: {exc}")
+    return results
+
+
+async def trigger_default_broadcast(bot: Bot, sender_user_id: int | None = None) -> dict:
+    return await send_broadcast_to_users(
+        bot,
+        text=DEFAULT_BROADCAST_TEXT,
+        photo_url=DEFAULT_BROADCAST_IMAGE_URL,
+        caption=DEFAULT_BROADCAST_TEXT,
+        sender_user_id=sender_user_id,
+    )
+
+
+async def handle_broadcast_message(message: types.Message, state: FSMContext, bot: Bot):
+    if not is_broadcast_admin(message.from_user.id if message.from_user else None):
+        await message.answer("Access denied. Only approved admins can send broadcasts.")
+        await state.clear()
+        return
+
+    if message.text and message.text.strip().lower() in {"/cancel", "cancel"}:
+        await state.clear()
+        await message.answer("Broadcast cancelled.")
+        return
+
+    if message.photo:
+        payload = {
+            "photo_file_id": message.photo[-1].file_id,
+            "caption": message.caption or None,
+        }
+    elif message.text is not None:
+        payload = {"text": message.text}
+    else:
+        await message.answer("Please send a text message or a photo for the broadcast.")
+        return
+
+    await state.clear()
+    await message.answer("Broadcast started. This may take a moment...")
+    results = await send_broadcast_to_users(
+        bot,
+        text=payload.get("text"),
+        photo_file_id=payload.get("photo_file_id"),
+        caption=payload.get("caption"),
+        sender_user_id=message.from_user.id,
+    )
+    print(f"Broadcast completed: {results}")
 
 
 async def main():
     reset_wallet_inventory()
+    load_registered_users()
+    refresh_broadcast_admin_ids()
     await register_bot_commands()
     await start_web_server()
     await dp.start_polling(bot)
