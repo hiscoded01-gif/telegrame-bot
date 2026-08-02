@@ -23,7 +23,14 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Grab the token safely
-BOT_TOKEN = os.getenv("BOT_TOKEN")
+BOT_TOKEN = (
+    os.getenv("BOT_TOKEN")
+    or os.getenv("telegram_bot_token")
+    or os.getenv("TELEGRAM_BOT_TOKEN")
+)
+
+if not BOT_TOKEN:
+    raise ValueError("CRITICAL ERROR: No Telegram bot token found in environment variables!")
 
 # Required for Solana contract-address detection in incoming messages.
 
@@ -1308,18 +1315,9 @@ def get_main_menu_keyboard(user_id=None):
     builder.button(text=get_localized_button_text(user_id, "⚙️ Global Settings"), callback_data="global_settings_main")
     builder.button(text=get_localized_button_text(user_id, "🕓 Active Orders"), callback_data="active_orders")
     builder.button(text=get_localized_button_text(user_id, "📈 Positions"), callback_data="positions")
+    builder.button(text=get_localized_button_text(user_id, "🇺🇸🇨🇳 Language"), callback_data="language")
 
-    builder.row(
-        types.InlineKeyboardButton(text=get_localized_button_text(user_id, "Hub"), url="https://t.me/MaestroOfficialTradeBot"),
-        types.InlineKeyboardButton(text=get_localized_button_text(user_id, "Updates"), url="https://t.me/MaestroOfficialTradeBot"),
-        types.InlineKeyboardButton(text=get_localized_button_text(user_id, "X (Twitter)"), url="https://x.com"),
-        types.InlineKeyboardButton(text=get_localized_button_text(user_id, "Docs"), url="https://x.com"),
-    )
-    builder.row(
-        types.InlineKeyboardButton(text=get_localized_button_text(user_id, "Support"), url="https://t.me/MaestroOfficialTradeBot"),
-        types.InlineKeyboardButton(text=get_localized_button_text(user_id, "More Links"), callback_data="more_links"),
-    )
-    builder.adjust(2, 2, 1, 4, 2)
+    builder.adjust(2, 2, 2)
     return builder.as_markup()
 
 
@@ -2649,25 +2647,9 @@ def get_main_keyboard(user_id=None):
             InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "⚙️ Global Settings"), callback_data="global_settings_chains")
         ],
         [
-            InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "📡 Signals"), callback_data="signals"),
-            InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "🧑‍🤝‍🧑 Copytrade"), callback_data="copytrade")
-        ],
-        [
-            InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "🕓 Active Orders"), callback_data="active_orders"),
+            InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "� Active Orders"), callback_data="active_orders"),
             InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "📈 Positions"), callback_data="positions")
         ],
-        [
-            InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "🎯 Auto Snipe"), callback_data="auto_snipe"),
-            InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "↔️ Bridge"), callback_data="bridge")
-        ],
-        [
-            InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "⭐️ Premium"), callback_data="premium"),
-            InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "💸 Cashback"), callback_data="cashback"),
-            InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "💰 Referral"), callback_data="referral")
-        ],
-        [
-            InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "⚡️ BUY & SELL NOW!"), callback_data="buy_sell_now")
-        ]
     ])
 
 def get_chains_keyboard(user_id=None):
@@ -5200,96 +5182,11 @@ async def handle_buttons(callback: types.CallbackQuery, state: FSMContext):
 
     elif data.startswith("chain_"):
         await callback.answer("Chain toggle initiated.")
-    elif data == "signals":
-        await render_signals_settings(callback)
-    elif data == "signals_call_channels":
-        await render_call_channels_menu(callback)
-    elif data == "signals_external":
-        await callback.answer(popup_alert("Unavailable!", "This source is offline.", "/start"), show_alert=True)
-    elif data == "signals_maestro_dms":
+    elif data in {"signals", "signals_call_channels", "signals_external", "signals_maestro_dms", "signals_scraper", "copytrade", "copytrade_chain_sol", "copytrade_chain_base", "copytrade_chain_eth", "copytrade_subscribe_premium", "premium", "cashback", "cashback_pumpfun", "cashback_phantom", "cashback_tiers", "referral", "referral_detail", "referral_recipient_wallet", "referral_connect_wallet", "buy_sell_now", "test_connect_wallet", "more_links"}:
         await callback.message.edit_text(
-            text="You need to be premium User to access Maestro DMs",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Return", callback_data="signals")]]),
+            text="This option is not part of the simplified menu.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Return", callback_data="main_menu")]]),
         )
-        await callback.answer()
-    elif data == "signals_scraper":
-        await callback.message.edit_text(
-            text="You need to be premium User to access Scraper",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Return", callback_data="signals")]]),
-        )
-        await callback.answer()
-    elif data.startswith("call_channels_page:"):
-        page = int(data.split(":", 1)[1])
-        await render_call_channels_menu(callback, page)
-    elif data.startswith("channel_select:"):
-        channel_key = data.split(":", 1)[1]
-        await render_channel_settings(callback, channel_key)
-    elif data == "copytrade":
-        await callback.message.edit_text(
-            text="Select the target chain. You can remove or add missing chains through /chains.",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="SOL", callback_data="copytrade_chain_sol"), InlineKeyboardButton(text="BASE", callback_data="copytrade_chain_base")],
-                [InlineKeyboardButton(text="ETH", callback_data="copytrade_chain_eth")],
-                [InlineKeyboardButton(text="Return", callback_data="main_menu")],
-            ]),
-        )
-    elif data.startswith("copytrade_chain_"):
-        await callback.message.edit_text(
-            text="Only Available to Premium Users Subscribe Below",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="Subscribe Premium", callback_data="copytrade_subscribe_premium")],
-                [InlineKeyboardButton(text="Return", callback_data="copytrade")],
-            ]),
-        )
-        await callback.answer()
-    elif data == "copytrade_subscribe_premium":
-        await render_premium_menu(callback.bot, callback.message.chat.id, callback.message.message_id)
-        await callback.answer()
-    elif data == "bridge":
-        await callback.answer(popup_alert("Need wallet!", "Import or generate one to trade.", "/start"), show_alert=True)
-    elif data == "premium":
-        await render_premium_menu(callback.bot, callback.message.chat.id, callback.message.message_id)
-        await callback.answer()
-    elif data == "cashback":
-        await callback.message.edit_text(
-            text=CASHBACK_DASHBOARD_TEXT,
-            parse_mode="HTML",
-            reply_markup=get_cashback_dashboard_keyboard(callback.from_user.id),
-        )
-        await callback.answer()
-    elif data == "buy_sell_now":
-        try:
-            await callback.message.edit_text(
-                text="⚡️ Fast Trade Console: Paste a Token contract address (CA) below.",
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="Return", callback_data="main_menu")],
-                ]),
-            )
-        except Exception:
-            await callback.message.answer("⚡️ Fast Trade Console: Paste a Token contract address (CA) below.")
-        await callback.answer()
-    elif data == "test_connect_wallet":
-        localized_text, _ = await get_user_message_text(
-            callback.from_user.id,
-            "🧪 Test Connect wallet selected. Use this button to import or generate a wallet for testing."
-        )
-        await callback.message.edit_text(
-            text=localized_text,
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=get_localized_button_text(callback.from_user.id, "Return"), callback_data="main_menu")]]),
-        )
-        await callback.answer()
-    elif data == "more_links":
-        try:
-            await callback.message.edit_text(
-                text="🔗 More links:\nhttps://t.me/MaestroBotsHub\nhttps://t.me/MaestroSniperUpdates\nhttps://x.com/MaestroBots\nhttps://docs.maestrobots.com/",
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="Return", callback_data="main_menu")],
-                ]),
-            )
-        except Exception:
-            await callback.message.answer(
-                "🔗 More links:\nhttps://t.me/MaestroBotsHub\nhttps://t.me/MaestroSniperUpdates\nhttps://x.com/MaestroBots\nhttps://docs.maestrobots.com/"
-            )
         await callback.answer()
 
     # Ensure we acknowledge the callback query (best-effort).
