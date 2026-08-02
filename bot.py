@@ -4,7 +4,6 @@ import json
 import os
 import re
 from html import escape
-from threading import Thread
 
 import aiohttp
 from aiohttp import web
@@ -19,27 +18,9 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from urllib.parse import quote
 
 from dotenv import load_dotenv
-from flask import Flask
 
-# Load the secret variables from the local .env file
 load_dotenv()
 
-# Lightweight Flask health server for Render / UptimeRobot ping checks.
-app = Flask("")
-
-@app.route("/")
-def home():
-    return "Bot is alive!"
-
-
-def run():
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
-
-# Start Flask ping server in background thread
-Thread(target=run, daemon=True).start()
-
-# Grab the token safely
 BOT_TOKEN = (
     os.getenv("BOT_TOKEN")
     or os.getenv("telegram_bot_token")
