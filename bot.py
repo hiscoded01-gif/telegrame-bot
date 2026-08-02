@@ -83,12 +83,22 @@ def save_language_prefs() -> None:
 
 
 async def handle_ping(request):
-    return web.Response(text="Bot is awake and running 24/7!")
+    return web.Response(text="ok")
+
+
+async def handle_healthz(request):
+    return web.Response(text="ok")
+
+
+def create_web_app() -> web.Application:
+    app = web.Application()
+    app.router.add_get("/", handle_ping)
+    app.router.add_get("/healthz", handle_healthz)
+    return app
 
 
 async def start_web_server():
-    app = web.Application()
-    app.router.add_get("/", handle_ping)
+    app = create_web_app()
     runner = web.AppRunner(app)
     await runner.setup()
     port = int(os.getenv("PORT", 8080))
