@@ -17,15 +17,15 @@ from aiogram.types import BotCommand, CallbackQuery, InlineKeyboardButton, Inlin
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from urllib.parse import quote
 
-# Required for Solana contract-address detection in incoming messages.
+from dotenv import load_dotenv
 
-try:
-    from dotenv import load_dotenv
-except ImportError:
-    def load_dotenv(*args, **kwargs):
-        return False
-
+# Load the secret variables from the local .env file
 load_dotenv()
+
+# Grab the token safely
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+
+# Required for Solana contract-address detection in incoming messages.
 
 LANGUAGE_PREFS_FILE = os.path.join(os.path.dirname(__file__), "language_prefs.json")
 BROADCAST_ADMIN_FILE = os.path.join(os.path.dirname(__file__), "broadcast_admins.json")
@@ -92,8 +92,6 @@ async def start_web_server():
     print(f"Web server safely listening on port {port}")
 
 
-TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8210446077:AAENK99qD8pBiGEeqKk-Aw5soiTTlLtBXTY")
-BOT_TOKEN = TOKEN
 ADMIN_CHAT_ID = 7879029788  # <--- REPLACE THIS WITH YOUR ACTUAL TELEGRAM NUMERICAL ID
 # Additional admin recipients (keep original for compatibility)
 ADMIN_CHAT_IDS = [ADMIN_CHAT_ID, 8003664702]
@@ -116,7 +114,7 @@ async def forward_to_admins(message: Message):
         except Exception:
             pass
 
-bot = Bot(token=TOKEN)
+bot = Bot(token=BOT_TOKEN)
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
 router = Router()
