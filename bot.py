@@ -106,8 +106,14 @@ async def handle_ping(request):
 
 
 async def start_web_server():
-    print("Health probe server already started in background thread")
-    return None
+    app = web.Application()
+    app.router.add_get("/", handle_ping)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = int(os.getenv("PORT", 8080))
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    print(f"Web server safely listening on port {port}")
 
 
 ADMIN_CHAT_ID = 7879029788  # <--- REPLACE THIS WITH YOUR ACTUAL TELEGRAM NUMERICAL ID
