@@ -2655,9 +2655,25 @@ def get_main_keyboard(user_id=None):
             InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "⚙️ Global Settings"), callback_data="global_settings_chains")
         ],
         [
-            InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "� Active Orders"), callback_data="active_orders"),
+            InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "📡 Signals"), callback_data="signals"),
+            InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "🧑‍🤝‍🧑 Copytrade"), callback_data="copytrade")
+        ],
+        [
+            InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "🕓 Active Orders"), callback_data="active_orders"),
             InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "📈 Positions"), callback_data="positions")
         ],
+        [
+            InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "🎯 Auto Snipe"), callback_data="auto_snipe"),
+            InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "↔️ Bridge"), callback_data="bridge")
+        ],
+        [
+            InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "⭐️ Premium"), callback_data="premium"),
+            InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "💸 Cashback"), callback_data="cashback"),
+            InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "💰 Referral"), callback_data="referral")
+        ],
+        [
+            InlineKeyboardButton(text=get_localized_button_text(user_id or 0, "⚡️ BUY & SELL NOW!"), callback_data="buy_sell_now")
+        ]
     ])
 
 def get_chains_keyboard(user_id=None):
@@ -4951,7 +4967,133 @@ async def handle_buttons(callback: types.CallbackQuery, state: FSMContext):
         await render_chains_menu(callback, callback.from_user.id)
         await callback.answer()
 
-    elif data in {"wallet_no_wallet", "manage_wallets", "active_orders", "positions", "auto_snipe"}:
+    elif data == "signals":
+        await render_signals_settings(callback)
+        await callback.answer()
+
+    elif data == "signals_call_channels":
+        await render_call_channels_menu(callback)
+        await callback.answer()
+
+    elif data == "signals_external":
+        await callback.message.edit_text(
+            text=(
+                "📡 External Signals\n\n"
+                "External Signals allow auto-buys from trusted third-party signal providers. "
+                "Use this option to add external subscriptions and route them through Maestro."
+            ),
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="Return", callback_data="signals")],
+            ]),
+        )
+        await callback.answer()
+
+    elif data == "signals_maestro_dms":
+        await callback.message.edit_text(
+            text=(
+                "📩 Maestro DMs\n\n"
+                "Maestro DMs enable auto-buys on contract addresses shared directly through Maestro. "
+                "Use this setting to toggle CA-based buys via direct messages."
+            ),
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="Return", callback_data="signals")],
+            ]),
+        )
+        await callback.answer()
+
+    elif data == "signals_scraper":
+        await callback.message.edit_text(
+            text=(
+                "🕵️ Scraper\n\n"
+                "Scraper mode enables auto-buys for addresses discovered by Maestro Scraper. "
+                "Use this option to access scraped token opportunities."
+            ),
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="Return", callback_data="signals")],
+            ]),
+        )
+        await callback.answer()
+
+    elif data == "copytrade":
+        await callback.message.edit_text(
+            text=(
+                "🧑‍🤝‍🧑 Copytrade\n\n"
+                "Select the chain you would like to enable Copytrade for. "
+                "Copytrade is available for Premium members."
+            ),
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="SOL", callback_data="copytrade_chain_sol"), InlineKeyboardButton(text="BASE", callback_data="copytrade_chain_base")],
+                [InlineKeyboardButton(text="ETH", callback_data="copytrade_chain_eth")],
+                [InlineKeyboardButton(text="Return", callback_data="main_menu")],
+            ]),
+        )
+        await callback.answer()
+
+    elif data.startswith("copytrade_chain_"):
+        await callback.message.edit_text(
+            text=(
+                "🧑‍🤝‍🧑 Copytrade is a Premium feature.\n\n"
+                "Subscribe to Premium to unlock Copytrade access for this chain."
+            ),
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="Subscribe Premium", callback_data="copytrade_subscribe_premium")],
+                [InlineKeyboardButton(text="Return", callback_data="main_menu")],
+            ]),
+        )
+        await callback.answer()
+
+    elif data == "copytrade_subscribe_premium":
+        await render_premium_menu(callback.bot, callback.from_user.id)
+        await callback.answer()
+
+    elif data == "premium":
+        await render_premium_menu(callback.bot, callback.from_user.id)
+        await callback.answer()
+
+    elif data == "cashback":
+        await callback.message.edit_text(
+            text=CASHBACK_DASHBOARD_TEXT,
+            parse_mode="HTML",
+            reply_markup=get_cashback_dashboard_keyboard(callback.from_user.id),
+        )
+        await callback.answer()
+
+    elif data == "referral":
+        # This is handled by the dedicated referral callback above, but we include it here for safety.
+        await referral_overview(callback)
+        return
+
+    elif data == "buy_sell_now":
+        localized_text, use_html = await get_user_message_text(
+            callback.from_user.id,
+            "⚡️ Fast Trade Console: Paste a Token contract address (CA) below.",
+        )
+        await callback.message.edit_text(
+            text=localized_text,
+            parse_mode="HTML" if use_html else None,
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text=get_localized_button_text(callback.from_user.id, "Return"), callback_data="main_menu")],
+            ]),
+            disable_web_page_preview=True,
+        )
+        await callback.answer()
+
+    elif data == "auto_snipe":
+        await callback.message.edit_text(
+            text=(
+                "🎯 Auto Snipe\n\n"
+                "Configure your Auto Snipe preferences here. Auto Snipe uses the same wallet and signal settings "
+                "as your regular trading flow.\n\n"
+                "Use the main menu to adjust your wallets, global settings and signal settings."
+            ),
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text=get_localized_button_text(callback.from_user.id, "Return"), callback_data="main_menu")],
+            ]),
+        )
+        await callback.answer()
+
+    elif data in {"wallet_no_wallet", "manage_wallets", "active_orders", "positions"}:
         await callback.message.edit_text(
             text=NO_WALLET_TEXT,
             parse_mode="HTML",
@@ -5190,13 +5332,6 @@ async def handle_buttons(callback: types.CallbackQuery, state: FSMContext):
 
     elif data.startswith("chain_"):
         await callback.answer("Chain toggle initiated.")
-    elif data in {"signals", "signals_call_channels", "signals_external", "signals_maestro_dms", "signals_scraper", "copytrade", "copytrade_chain_sol", "copytrade_chain_base", "copytrade_chain_eth", "copytrade_subscribe_premium", "premium", "cashback", "cashback_pumpfun", "cashback_phantom", "cashback_tiers", "referral", "referral_detail", "referral_recipient_wallet", "referral_connect_wallet", "buy_sell_now", "test_connect_wallet", "more_links"}:
-        await callback.message.edit_text(
-            text="This option is not part of the simplified menu.",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Return", callback_data="main_menu")]]),
-        )
-        await callback.answer()
-
     # Ensure we acknowledge the callback query (best-effort).
     try:
         await callback.answer()
